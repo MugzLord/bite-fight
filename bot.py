@@ -7,6 +7,9 @@ from collections import defaultdict
 
 import discord
 from discord.ext import commands
+from io import BytesIO
+from PIL import Image, ImageDraw, ImageFont
+
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 PREFIX = os.getenv("COMMAND_PREFIX", "!")
@@ -63,6 +66,114 @@ def pick_target(game: BiteFightGame, attacker: discord.Member):
 
 def clamp(v, lo, hi):
     return max(lo, min(hi, v))
+
+async def fetch_avatar(member: discord.Member, size=256) -> Image.Image:
+    # Get the member's current avatar as bytes; fallback to a solid placeholder
+    try:
+        b = await member.display_avatar.replace(size=size, format="png").read()
+        im = Image.open(BytesIO(b)).convert("RGBA")
+    except Exception:
+        im = Image.new("RGBA", (size, size), (40, 40, 40, 255))
+    # ensure square
+    im = im.resize((size, size), Image.LANCZOS)
+    return im
+
+def circle_mask(size):
+    m = Image.new("L", (size, size), 0)
+    d = ImageDraw.Draw(m)
+    d.ellipse((0, 0, size, size), fill=255)
+    return m
+
+def rounded_square(im: Image.Image, radius=36):
+    # apply rounded corners
+    w, h = im.size
+    mask = Image.new("L", (w, h), 0)
+    draw = ImageDraw.Draw(mask)
+    draw.rounded_rectangle((0, 0, w, h), radius=radius, fill=255)
+    im.putalpha(mask)
+    return im
+
+def fit_center(im: Image.Image, box_w, box_h):
+    return im.resize((box_w, box_h), Image.LANCZOS)
+
+def load_asset(name: str) -> Image.Image:
+    path = os.path.join("assets", name)
+    return Image.open(path).convert("RGBA")
+
+async def build_versus_card(attacker: discord.Member, target: discord.Member, action_text: str) -> BytesIO:
+    # Canvas
+    W, H = 900, 500
+    bg = Image.new("RGBA", (W, H), (24, 24, 24, 255))
+
+    # Subtle gradient
+    g = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(g)
+    for y in range(H):
+        a = int(180 * (y / H))
+        draw.line([(0, y), (W, y)], fill=(255, 255, 255, int(a*0.08)))
+    bg = Image.alpha_composite(bg, g)
+
+    # Avatar boxes
+    pad = 32
+    face = 360
+    left_box = (pad, pad, pad + face, pad + face)
+    right_box = (W - pad - face, pad, W - pad, pad + face)
+
+    # Fetch avatars
+    la = await fetch_avatar(attacker, size=512)
+    ra = await fetch_avatar(target, size=512)
+
+    la = fit_center(la, face, face)
+    ra = fit_center(ra, face, face)
+
+    la = rounded_square(la, radius=40)
+    ra = rounded_square(ra, radius=40)
+
+    card = bg.copy()
+    card.alpha_composite(la, dest=(left_box[0], left_box[1]))
+    card.alpha_composite(ra, dest=(right_box[0], right_box[1]))
+
+    # Crossed swords overlay (center)
+    try:
+        swords = load_asset("swords.png")
+        # scale down if needed
+        sw = int(W * 0.35)
+        sh = int(swords.height * (sw / swords.width))
+        swords = swords.resize((sw, sh), Image.LANCZOS)
+        sx = (W - sw) // 2
+        sy = int(H * 0.18)
+        card.alpha_composite(swords, dest=(sx, sy))
+    except Exception:
+        pass  # safe if asset missing
+
+    # Action text strip at bottom
+    strip_h = 92
+    strip = Image.new("RGBA", (W - pad*2, strip_h), (0, 0, 0, 170))
+    card.alpha_composite(strip, dest=(pad, H - pad - strip_h))
+    draw = ImageDraw.Draw(card)
+
+    # Font: Pillow will fall back; you can drop a TTF into assets and load it if you want
+    try:
+        fnt = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 32)
+    except Exception:
+        fnt = ImageFont.load_default()
+
+    # Truncate text if too long
+    text = action_text.strip()
+    max_px = W - pad*2 - 30
+    while fnt.getlength(text) > max_px and len(text) > 8:
+        text = text[:-4] + "..."
+
+    tx = pad + 16
+    ty = H - pad - strip_h + (strip_h - fnt.getbbox(text)[3]) // 2 - 6
+    draw.text((tx, ty), text, font=fnt, fill=(255, 255, 255, 255))
+
+    # Return as bytes for Discord upload
+    buf = BytesIO()
+    card.convert("RGB").save(buf, format="PNG", optimize=True)
+    buf.seek(0)
+    return buf
+
 
 # ---- Commands ----
 @bot.command(name="bf_start")
@@ -208,6 +319,37 @@ async def run_game(ctx, game: BiteFightGame):
                         player=p.display_name
                     ))
 
+        # choose a key play to illustrate (prefer messages with attacker/target)
+        key_play = None
+        key_attacker = None
+        key_target = None
+        for e in reversed(events):
+            # very cheap parse: look up current attacker/target names in text
+            # better: capture when you append events.
+            for a in alive_players(game):
+                for t in game.players:
+                    if a.id == t.id:
+                        continue
+                    a_name = a.display_name
+                    t_name = t.display_name
+                    if a_name in e and t_name in e:
+                        key_play = e
+                        key_attacker = a
+                        key_target = t
+                        break
+                if key_play:
+                    break
+            if key_play:
+                break
+
+        file = None
+        if key_play and key_attacker and key_target:
+            try:
+                img_bytes = await build_versus_card(key_attacker, key_target, key_play)
+                file = discord.File(img_bytes, filename=f"round_{game.round_num}.png")
+            except Exception:
+                file = None
+
         # Gather attackers in random order
         attackers = list(alive_players(game))
         random.shuffle(attackers)
@@ -317,7 +459,36 @@ async def run_game(ctx, game: BiteFightGame):
         # Post one embed for the round
         if not events:
             events.append("The fighters circle, waiting for an opening.")
-
+        
+        # Try to pick a key play that mentions both an attacker and a target
+        key_play = None
+        key_attacker = None
+        key_target = None
+        for e in reversed(events):
+            found = False
+            for a in alive_players(game):
+                for t in game.players:
+                    if a.id == t.id:
+                        continue
+                    if a.display_name in e and t.display_name in e:
+                        key_play = e
+                        key_attacker = a
+                        key_target = t
+                        found = True
+                        break
+                if found:
+                    break
+            if found:
+                break
+        
+        file = None
+        if key_play and key_attacker and key_target:
+            try:
+                img_bytes = await build_versus_card(key_attacker, key_target, key_play)
+                file = discord.File(img_bytes, filename=f"round_{game.round_num}.png")
+            except Exception:
+                file = None  # keep the round going even if image fails
+        
         hp_board = ", ".join(f"{p.display_name}({game.hp[p.id]})" for p in alive_now)
         embed = discord.Embed(
             title=f"Bite & Fight — Round {game.round_num}",
@@ -327,8 +498,13 @@ async def run_game(ctx, game: BiteFightGame):
         )
         embed.add_field(name="Events", value="\n".join(events)[:1024], inline=False)
         embed.add_field(name="HP", value=hp_board[:1024], inline=False)
-        await game.channel.send(embed=embed)
-
+        
+        if file:
+            embed.set_image(url=f"attachment://round_{game.round_num}.png")
+            await game.channel.send(embed=embed, file=file)
+        else:
+            await game.channel.send(embed=embed)
+        
         # Short pause between rounds
         await asyncio.sleep(2.2)
 
