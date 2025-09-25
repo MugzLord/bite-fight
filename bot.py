@@ -16,7 +16,6 @@ INTENTS.guilds = True
 INTENTS.members = True
 
 bot = commands.Bot(command_prefix=PREFIX, intents=INTENTS)
-
 # ---- Game State (per channel) ----
 class BiteFightGame:
     def __init__(self, channel: discord.TextChannel, banter):
