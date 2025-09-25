@@ -1,0 +1,70 @@
+{
+  "join_prompt": [
+    "Bite & Fight lobby is open. Type !bf_join to enter the pit.",
+    "Doors are open. Join now with !bf_join before the teeth come out.",
+    "Sharpen your fangs or your fists. !bf_join to play."
+  ],
+  "on_join": [
+    "[player] steps in, grinning like they already won.",
+    "[player] enters the circle. Crowd takes notice.",
+    "[player] ties the shoelaces tighter and nods to the ref."
+  ],
+  "intro": [
+    "The gate slams shut. Footsteps on concrete. No turning back.",
+    "Steel on steel. Breath in the dark. The match begins.",
+    "A hush falls. Then the roar. Time to settle scores."
+  ],
+  "round_intro": [
+    "Dust hangs in the air.",
+    "No one blinks. Not yet.",
+    "Every step counts now."
+  ],
+  "bleed_tick": [
+    "[player] clutches a wound for [dmg] damage. Still standing at [hp].",
+    "[player] loses [dmg] to bleeding. Balance sways at [hp] HP."
+  ],
+  "death_bleed": [
+    "[player] drops to the floor, drained by a dozen small cuts.",
+    "[player] fades out, the bleed takes the last of it."
+  ],
+  "bite_miss": [
+    "[attacker] lunges at [target] but bites air.",
+    "[attacker] snaps too early. [target] is long gone."
+  ],
+  "bite_hit": [
+    "[attacker] sinks teeth into [target] for [dmg]. [tag] [target] sits at [hp] HP.",
+    "[attacker] bites clean. [target] takes [dmg]. [tag] Standing at [hp]."
+  ],
+  "bite_bleed": [
+    "bleed applied (+[bleed] per round)",
+    "fresh cut starts ticking (+[bleed] per round)"
+  ],
+  "death_bite": [
+    "[target] cannot shake the bite and folds.",
+    "Fangs settle it. [target] is out."
+  ],
+  "fight_miss": [
+    "[attacker] swings wide at [target].",
+    "[attacker] mistimes the hit, [target] slips past."
+  ],
+  "fight_hit": [
+    "[attacker] lands a solid hit on [target] for [dmg]. [target] at [hp] HP.",
+    "[attacker] rattles [target] for [dmg]. [target] steadies at [hp] HP."
+  ],
+  "fight_crit": [
+    "Critical. [attacker] blasts [target] for [dmg]. [target] staggers at [hp].",
+    "Clean counter. [attacker] cracks [target] for [dmg]. [target] holds at [hp]."
+  ],
+  "death_fight": [
+    "[target] hits the ground and stays there.",
+    "Lights out. [target] is done."
+  ],
+  "winner": [
+    "[winner] stands alone. That is the match.",
+    "One left in the circle. [winner] takes it."
+  ],
+  "no_winner": [
+    "No one left to raise a hand. The arena is quiet.",
+    "Double fall. No winner this time."
+  ]
+}
