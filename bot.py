@@ -32,6 +32,9 @@ class BiteFightGame:
         self.round_num = 0
         self.max_hp = 100
         self.task = None
+        # ADD
+        self.lobby_view = None
+        self._ctx = None  # store start context for later
 
     def reset(self):
         self.in_lobby = False
@@ -41,9 +44,95 @@ class BiteFightGame:
         self.bleed.clear()
         self.round_num = 0
         self.task = None
+        # ADD
+        self.lobby_view = None
+        self._ctx = None
 
 # Channel ID -> Game
 GAMES: dict[int, BiteFightGame] = {}
+
+class LobbyView(discord.ui.View):
+    def __init__(self, game: "BiteFightGame", host: discord.Member, timeout: float = 30.0):
+        super().__init__(timeout=timeout)
+        self.game = game
+        self.host = host
+        self.message: discord.Message | None = None
+
+    async def on_timeout(self):
+        # auto-begin when the lobby times out (if still open)
+        if self.game.in_lobby:
+            try:
+                # disable buttons
+                for c in self.children:
+                    if isinstance(c, discord.ui.Button):
+                        c.disabled = True
+                if self.message:
+                    await self.message.edit(view=self)
+            except Exception:
+                pass
+            # call your existing begin
+            ctx = self.game._ctx
+            await bf_begin(ctx)
+
+    async def update_counter(self):
+        if not self.message:
+            return
+        count = len(self.game.players)
+        embed = self.message.embeds[0]
+        # update the "0 tributes have volunteered" line
+        field_name = "Status"
+        status_line = f"⚔️ {count} tribute{'s' if count != 1 else ''} have volunteered"
+        # Replace or add field
+        found = False
+        for i, f in enumerate(embed.fields):
+            if f.name == field_name:
+                embed.set_field_at(i, name=field_name, value=status_line, inline=False)
+                found = True
+                break
+        if not found:
+            embed.add_field(name=field_name, value=status_line, inline=False)
+        try:
+            await self.message.edit(embed=embed, view=self)
+        except Exception:
+            pass
+
+    @discord.ui.button(label="Join", emoji="🍔", style=discord.ButtonStyle.success)
+    async def join_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        user = interaction.user
+        if not self.game.in_lobby:
+            return await interaction.response.send_message("Lobby closed.", ephemeral=True)
+        if user.bot:
+            return await interaction.response.send_message("Bots cannot join.", ephemeral=True)
+        if user in self.game.players:
+            return await interaction.response.send_message("You are already in.", ephemeral=True)
+        self.game.players.append(user)
+        self.game.hp[user.id] = self.game.max_hp
+        await interaction.response.send_message(f"{user.display_name} joined the arena.", ephemeral=True)
+        await self.update_counter()
+
+    @discord.ui.button(label="Tributes", emoji="⚔️", style=discord.ButtonStyle.secondary)
+    async def tributes_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        names = ", ".join(p.display_name for p in self.game.players) or "None yet"
+        await interaction.response.send_message(f"Current tributes: {names}", ephemeral=True)
+
+    @discord.ui.button(label="Let the battle begin", emoji="🍽️", style=discord.ButtonStyle.primary)
+    async def start_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # only host can force start
+        if interaction.user.id != self.host.id:
+            return await interaction.response.send_message("Only the host can start.", ephemeral=True)
+        if not self.game.in_lobby:
+            return await interaction.response.send_message("Already started.", ephemeral=True)
+        # disable buttons and start
+        for c in self.children:
+            if isinstance(c, discord.ui.Button):
+                c.disabled = True
+        try:
+            await interaction.response.edit_message(view=self)
+        except Exception:
+            pass
+        ctx = self.game._ctx
+        await bf_begin(ctx)
+
 
 # ---- Banter helpers ----
 def line(pool_name, banter):
@@ -178,12 +267,11 @@ async def build_versus_card(attacker: discord.Member, target: discord.Member, ac
 # ---- Commands ----
 @bot.command(name="bf_start")
 async def bf_start(ctx):
-    """Start a Bite & Fight lobby in this channel."""
     chan_id = ctx.channel.id
     if chan_id in GAMES and (GAMES[chan_id].in_lobby or GAMES[chan_id].running):
         return await ctx.reply("A game is already active in this channel.")
 
-    # load banter once per start (so you can live edit the json between games)
+    # load banter
     try:
         with open("banter.json", "r", encoding="utf-8") as f:
             banter = json.load(f)
@@ -193,16 +281,27 @@ async def bf_start(ctx):
     game = BiteFightGame(ctx.channel, banter)
     GAMES[chan_id] = game
     game.in_lobby = True
+    game._ctx = ctx
 
-    join_text = line("join_prompt", banter) or "Bite & Fight is open. Type !bf_join to enter."
+    title = f"{ctx.guild.name or 'Bite & Fight'} — Arena"
+    subtitle = "Part 1 - Setting The Table"
+    desc = "🍔 to join the fight!\n🍽️ to let the battle begin!"
+
     embed = discord.Embed(
-        title="Bite & Fight — Lobby Open",
-        description=f"{join_text}\nLobby closes in **30 seconds**.",
-        color=discord.Color.red(),
-        timestamp=datetime.datetime.utcnow()
+        title=title,
+        description=f"**{subtitle}**\n\n{desc}",
+        color=discord.Color.dark_gold()
     )
-    embed.set_footer(text="Use !bf_join to enter. Host: " + ctx.author.display_name)
-    await ctx.send(embed=embed)
+    # top-right badge image (optional: replace with your own URL)
+    embed.set_thumbnail(url="https://i.imgur.com/4Zb9o2p.png")  # placeholder burger/flame badge
+    embed.add_field(name="Status", value="⚔️ 0 tributes have volunteered", inline=False)
+    embed.set_footer(text=f"Host: {ctx.author.display_name} • Lobby closes in 30s")
+
+    view = LobbyView(game, host=ctx.author, timeout=30.0)
+    game.lobby_view = view
+    msg = await ctx.send(embed=embed, view=view)
+    view.message = msg  # so the view can edit the message
+
 
     # 30s join window (with a midpoint update)
     async def lobby_timer():
