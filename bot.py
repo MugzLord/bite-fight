@@ -423,28 +423,14 @@ async def bf_start(ctx):
 
     title = f"{ctx.guild.name or 'Bite & Fight'} — Arena"
     subtitle = "Part 1 - Setting The Table"
-    
-    # No more bullet instructions here
-    desc = ""
+    desc = "🍔 to join the fight!"  # keep this, remove the 'let the battle begin' line
     
     embed = discord.Embed(
         title=title,
         description=f"**{subtitle}**\n\n{desc}",
         color=discord.Color.dark_gold()
     )
-    
-    # attach a local logo as thumbnail if available (unchanged logic)
-    files = []
-    logo_path = find_asset(["logo.png", "logo.jpg", "logo.jpeg"])
-    if logo_path:
-        ext = os.path.splitext(logo_path)[1].lower()
-        attach_name = f"logo{ext}"
-        embed.set_thumbnail(url=f"attachment://{attach_name}")
-        files.append(discord.File(logo_path, filename=attach_name))
-    else:
-        # (optional) fallback thumbnail URL or just skip entirely
-        pass
-    
+          
     # NO Status field anymore
     if game.is_tournament:
         embed.add_field(name="Pot", value=f"💰 {game.pot} • Entry {game.entry_fee}", inline=False)
@@ -454,11 +440,10 @@ async def bf_start(ctx):
     
     view = LobbyView(game, host=ctx.author, timeout=30.0)
     game.lobby_view = view
-    if files:
-        msg = await ctx.send(embed=embed, view=view, files=files)
-    else:
-        msg = await ctx.send(embed=embed, view=view)
+    
+    msg = await ctx.send(embed=embed, view=view)   # ← no files parameter
     view.message = msg
+
 
 
     async def lobby_timer():
