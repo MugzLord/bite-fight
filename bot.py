@@ -521,9 +521,10 @@ async def bf_start(ctx):
     view = LobbyView(game, host=ctx.author, timeout=30.0)
     game.lobby_view = view
     
-    msg = await ctx.send(embed=embed, view=view)   # ← no files parameter
-    view.message = msg
+    embed, files = brand_embed(embed)
+    msg = await ctx.send(embed=embed, view=view, files=files)
 
+    view.message = msg
 
 
     async def lobby_timer():
@@ -587,7 +588,9 @@ async def bf_begin(ctx):
         embed.add_field(name="Prize mode", value=s.get("prize_mode", "credits").title(), inline=True)
 
     embed.set_footer(text=f"Host: {ctx.author.display_name}")
-    await ctx.send(embed=embed)
+    embed, files = brand_embed(embed)
+    await ctx.send(embed=embed, files=files)
+
 
     # run rounds; if anything blows up, show it so it doesn't look "stuck"
     try:
@@ -640,7 +643,20 @@ def hp_bar(cur: int, max_hp: int, width: int = 18) -> str:
     filled = int(round(width * (cur / max_hp))) if max_hp else 0
     return "▰" * filled + "▱" * (width - filled)
 
+def brand_embed(embed: discord.Embed, files_list=None):
+    """Attach Bite & Fight logo as FOOTER ICON without touching thumbnail."""
+    path = find_asset(["logo.png", "logo.jpg", "logo.jpeg"])
+    files = list(files_list or [])
+    if not path:
+        return embed, files
 
+    files.append(discord.File(path, filename="bf_logo.png"))
+    # preserve whatever footer text you already set
+    footer_text = getattr(embed.footer, "text", None) or ""
+    embed.set_footer(text=footer_text, icon_url="attachment://bf_logo.png")
+    return embed, files
+
+#--commands--#
 @bot.command(name="bf_stop")
 async def bf_stop(ctx):
     chan_id = ctx.channel.id
@@ -804,11 +820,17 @@ async def run_game(ctx, game: BiteFightGame):
         embed.add_field(name="HP", value="\n".join(lines_hp)[:1024], inline=False)
 
 
+        files = []
         if file is not None:
             embed.set_image(url=f"attachment://round_{game.round_num}.png")
-            await game.channel.send(embed=embed, file=file)
+            files.append(file)
+        
+        embed, files = brand_embed(embed, files_list=files)
+        if files:
+            await game.channel.send(embed=embed, files=files)
         else:
             await game.channel.send(embed=embed)
+
 
         # -------- end condition & winner embed --------
         alive_now = alive_players(game)
@@ -897,6 +919,8 @@ async def run_game(ctx, game: BiteFightGame):
             if logo_path:
                 files_to_send.append(discord.File(logo_path, filename="winner.png"))
                 w_embed.set_image(url="attachment://winner.png")
+
+            w_embed, files_to_send = brand_embed(w_embed, files_to_send)
             
             # --- POST PROFILE IMAGE ABOVE THE WINNER EMBED (uses versus_bg via build_profile_card)
             if winner:
