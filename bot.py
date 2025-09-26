@@ -321,6 +321,8 @@ async def build_versus_card(
     pad = 32
     face = 360
 
+
+
     # --- background image base (versus_bg.png)
     from pathlib import Path
     try:
@@ -358,6 +360,68 @@ async def build_versus_card(
 
     card.alpha_composite(la, dest=(pad, pad))
     card.alpha_composite(ra, dest=(W - pad - face, pad))
+
+    # --- winner/loser ribbons + badges (trophy / RIP)
+    rb_h = 44  # ribbon height
+    left_rect  = (pad, pad + face - rb_h, pad + face, pad + face)
+    right_rect = (W - pad - face, pad + face - rb_h, W - pad, pad + face)
+    
+    # colours
+    WIN  = (70, 130, 180, 255)  # steel-blue
+    LOSE = (200, 60, 60, 255)   # red
+    
+    # decide which side is loser/winner based on grey flags
+    # (greyed side = loser)
+    if grey_left != grey_right:  # only draw when one side is greyed
+        d2 = ImageDraw.Draw(card)
+    
+        if grey_left:
+            # left loses, right wins
+            d2.rectangle(left_rect,  fill=LOSE)
+            d2.rectangle(right_rect, fill=WIN)
+            left_badge, right_badge = "rip", "trophy"
+        else:
+            # right loses, left wins
+            d2.rectangle(left_rect,  fill=WIN)
+            d2.rectangle(right_rect, fill=LOSE)
+            left_badge, right_badge = "trophy", "rip"
+    
+        def _paste_badge(kind: str, rect: tuple[int,int,int,int]):
+            # try asset first, else minimal text fallback
+            name_map = {
+                "trophy": ["trophy.png", "cup.png", "trophy_emoji.png"],
+                "rip":    ["rip.png", "tombstone.png", "grave.png", "rip_emoji.png"],
+            }
+            path = find_asset(name_map[kind]) if 'find_asset' in globals() else None
+            x0, y0, x1, y1 = rect
+            rw, rh = (x1 - x0), (y1 - y0)
+            if path:
+                try:
+                    ic = Image.open(path).convert("RGBA")
+                    scale = min((rw - 16) / ic.width, (rh - 8) / ic.height)
+                    ic = ic.resize((max(1, int(ic.width * scale)), max(1, int(ic.height * scale))), Image.LANCZOS)
+                    px = x0 + (rw - ic.width) // 2
+                    py = y0 + (rh - ic.height) // 2
+                    card.alpha_composite(ic, dest=(px, py))
+                    return
+                except Exception:
+                    pass
+            # fallback: simple label
+            try:
+                f = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 24)
+            except Exception:
+                f = ImageFont.load_default()
+            label = "RIP" if kind == "rip" else "WIN"
+            tw = int(f.getlength(label))
+            th = f.getbbox(label)[3]
+            px = x0 + (rw - tw) // 2
+            py = y0 + (rh - th) // 2 - 2
+            d2.text((px, py), label, font=f, fill=(255, 255, 255, 255))
+    
+        _paste_badge(left_badge,  left_rect)
+        _paste_badge(right_badge, right_rect)
+    # --- end winner/loser ribbons
+
 
               
     # --- crossed swords (center)
@@ -571,6 +635,12 @@ async def build_profile_card(member: discord.Member) -> BytesIO:
     out.seek(0)
     return out
 
+def hp_bar(cur: int, max_hp: int, width: int = 18) -> str:
+    cur = max(0, min(cur, max_hp))
+    filled = int(round(width * (cur / max_hp))) if max_hp else 0
+    return "▰" * filled + "▱" * (width - filled)
+
+
 @bot.command(name="bf_stop")
 async def bf_stop(ctx):
     chan_id = ctx.channel.id
@@ -721,16 +791,18 @@ async def run_game(ctx, game: BiteFightGame):
             except Exception:
                 file = None  # never crash a round just for the art
 
-        # -------- post the round (single embed per round) --------
-        hp_board = ", ".join(f"{p.display_name}({game.hp[p.id]})" for p in alive_players(game))
-        embed = discord.Embed(
-            title=f"Bite & Fight — Round {game.round_num}",
-            description=line("round_intro", game.banter) or "",
-            color=discord.Color.dark_red(),
-            timestamp=datetime.datetime.utcnow()
-        )
-        embed.add_field(name="Events", value="\n".join(events)[:1024], inline=False)
-        embed.add_field(name="HP", value=hp_board[:1024], inline=False)
+     
+        # pretty life bars for ALL players (alive or 0 HP)
+        lines_hp = []
+        for p in game.players:
+            hp = game.hp.get(p.id, 0)
+            pct = int(round(100 * hp / game.max_hp)) if game.max_hp else 0
+            bar = hp_bar(hp, game.max_hp, width=18)
+            status = "🏆" if hp > 0 else "💀"
+            # name on the left, bar centred in a code span, percent on the right
+            lines_hp.append(f"{status} **{p.display_name}**\n`{bar}` {pct}%")
+        embed.add_field(name="HP", value="\n".join(lines_hp)[:1024], inline=False)
+
 
         if file is not None:
             embed.set_image(url=f"attachment://round_{game.round_num}.png")
@@ -762,6 +834,34 @@ async def run_game(ctx, game: BiteFightGame):
                     _bump(stats["global"]["kills"], uid, k)
                     _bump(stats["guilds"][str(guild_id)]["kills"], uid, k)
             _save_stats(stats)
+
+            # ---- TOURNAMENT STATS (wins, kills, credits, totals) ----
+            if game.is_tournament:
+                state = _tourney_state_load()
+                tid = state.get("id")
+            
+                all_ts = _tourney_stats_all()
+                ts = all_ts.get(tid, {"wins": {}, "kills": {}, "credits_won": {}, "games": 0, "pots": 0})
+            
+                if winner:
+                    _bump(ts["wins"], winner.id, 1)
+                    # credit the winner with this game's pot; change to a fixed value if you prefer
+                    _bump(ts["credits_won"], winner.id, game.pot)
+            
+                for uid, k in game.kills.items():
+                    if k > 0:
+                        _bump(ts["kills"], uid, k)
+            
+                ts["games"] = ts.get("games", 0) + 1
+                ts["pots"]  = ts.get("pots", 0) + game.pot
+            
+                all_ts[tid] = ts
+                _tourney_stats_save(all_ts)
+            
+                # reflect progress on the active tournament
+                state["games_played"] = int(state.get("games_played", 0)) + 1
+                _tourney_state_save(state)
+
 
             # Winner embed (no separate “Round X Summary” card)
             # ---------- Winner card (Pixxie-style) ----------
