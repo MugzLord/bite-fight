@@ -1,3 +1,4 @@
+# bot.py
 import os
 import json
 import random
@@ -9,7 +10,6 @@ from io import BytesIO
 import discord
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance
-
 
 # =========================
 # Config / Env
@@ -30,22 +30,22 @@ PRIZES_FILE = os.getenv("BF_PRIZES_FILE", "bf_prizes.json")              # wishl
 # Per-channel default ante (used when starting a new tournament)
 CHANNEL_ANTE = defaultdict(lambda: int(os.getenv("BF_ANTE", "100")))
 
+# ----- asset lookup (root + assets/ + assets)) -----
 ROOT_DIR = os.path.dirname(__file__)
 ASSET_DIRS = [
-    os.path.join(ROOT_DIR, "assets"),   # normal folder
-    os.path.join(ROOT_DIR, "assets)"),  # your accidental folder name
-    ROOT_DIR,                            # repo root (where logo.png / swords.png are now)
+    os.path.join(ROOT_DIR, "assets"),
+    os.path.join(ROOT_DIR, "assets)"),
+    ROOT_DIR,  # repo root (where your logo.png/swords.png currently live)
 ]
 
 def find_asset(candidates: list[str]) -> str | None:
-    """Return the first existing file path from our asset dirs."""
+    """Return the first existing file path from our known asset dirs."""
     for d in ASSET_DIRS:
         for name in candidates:
             p = os.path.join(d, name)
             if os.path.exists(p):
                 return p
     return None
-
 
 # =========================
 # Small JSON helpers
@@ -65,13 +65,7 @@ def _json_save(path, data):
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
-        
-def find_asset(candidates):
-    for name in candidates:
-        p = os.path.join(ASSETS_DIR, name)
-        if os.path.exists(p):
-            return p
-    return None
+
 # Global/server stats (wins, kills)
 def _load_stats():
     return _json_load(STATS_FILE, {"global": {"wins": {}, "kills": {}}, "guilds": {}})
@@ -110,14 +104,6 @@ def _prizes_load():
 def _prizes_save(d):
     _json_save(PRIZES_FILE, d)
 
-# Find a local asset by possible names
-def find_asset(names):
-    for n in names:
-        p = os.path.join("assets", n)
-        if os.path.exists(p):
-            return p
-    return None
-
 # =========================
 # Bot
 # =========================
@@ -154,7 +140,6 @@ class BiteFightGame:
 
     def reset(self):
         self.in_lobby = False
-               # ... unchanged reset logic ...
         self.running = False
         self.players = []
         self.hp.clear()
@@ -165,6 +150,7 @@ class BiteFightGame:
         self._ctx = None
         self.start_time = None
         self.kills.clear()
+
         state = _tourney_state_load()
         self.is_tournament = bool(state.get("active", False))
         self.entry_fee = int(state.get("ante", 100)) if self.is_tournament else 0
@@ -299,9 +285,6 @@ def rounded_square(im: Image.Image, radius=36):
     im.putalpha(mask)
     return im
 
-def fit_center(im: Image.Image, box_w, box_h):
-    return im.resize((box_w, box_h), Image.LANCZOS)
-
 def grey_out(im: Image.Image, dim: float = 0.55) -> Image.Image:
     """Desaturate and darken an avatar to indicate the loser."""
     g = ImageOps.grayscale(im).convert("RGBA")
@@ -333,43 +316,23 @@ async def build_versus_card(
     right_xy = (W - pad - face, pad)
 
     # Fetch avatars
-    async def _fetch(member, size=512):
-        try:
-            b = await member.display_avatar.replace(size=size, format="png").read()
-            im = Image.open(BytesIO(b)).convert("RGBA")
-        except Exception:
-            im = Image.new("RGBA", (size, size), (40, 40, 40, 255))
-        return im.resize((size, size), Image.LANCZOS)
+    la = await fetch_avatar(attacker, size=512)
+    ra = await fetch_avatar(target, size=512)
 
-    la = await _fetch(attacker)
-    ra = await _fetch(target)
-
-    # Round corners
-    def _rounded(im, radius=40):
-        mask = Image.new("L", im.size, 0)
-        ImageDraw.Draw(mask).rounded_rectangle((0, 0, *im.size), radius=radius, fill=255)
-        im.putalpha(mask)
-        return im
-
-    la = _rounded(la.resize((face, face), Image.LANCZOS))
-    ra = _rounded(ra.resize((face, face), Image.LANCZOS))
-
-    # Grey out loser if requested
-    def _grey(im, dim=0.55):
-        g = ImageOps.grayscale(im).convert("RGBA")
-        return ImageEnhance.Brightness(g).enhance(dim)
+    la = rounded_square(la.resize((face, face), Image.LANCZOS), radius=40)
+    ra = rounded_square(ra.resize((face, face), Image.LANCZOS), radius=40)
 
     if grey_left:
-        la = _grey(la)
+        la = grey_out(la)
     if grey_right:
-        ra = _grey(ra)
+        ra = grey_out(ra)
 
     # Compose avatars
     card = bg.copy()
     card.alpha_composite(la, dest=left_xy)
     card.alpha_composite(ra, dest=right_xy)
 
-    # Crossed swords overlay (center) — try several filenames
+    # Crossed swords overlay (center)
     swords_path = find_asset(["swords.png", "sword.png", "crossed_swords.png"])
     if swords_path:
         try:
@@ -384,7 +347,6 @@ async def build_versus_card(
             print(f"[Bite&Fight] swords overlay failed: {e}")
     else:
         print("[Bite&Fight] swords asset not found")
-
 
     # Action text strip at bottom
     strip_h = 92
@@ -410,7 +372,6 @@ async def build_versus_card(
     card.convert("RGB").save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return buf
-
 
 # =========================
 # Commands
@@ -440,14 +401,12 @@ async def bf_start(ctx):
     files = []
     logo_path = find_asset(["logo.png", "logo.jpg", "logo.jpeg"])
     if logo_path:
-        ext = os.path.splitext(logo_path)[1].lower()   # .png/.jpg
+        ext = os.path.splitext(logo_path)[1].lower()
         attach_name = f"logo{ext}"
         embed.set_thumbnail(url=f"attachment://{attach_name}")
         files.append(discord.File(logo_path, filename=attach_name))
     else:
-        # optional fallback
-        embed.set_thumbnail(url="https://i.imgur.com/4Zb9o2p.png")
-
+        embed.set_thumbnail(url="https://i.imgur.com/4Zb9o2p.png")  # fallback
 
     embed.add_field(name="Status", value="⚔️ 0 tributes have volunteered", inline=False)
     if game.is_tournament:
@@ -461,7 +420,6 @@ async def bf_start(ctx):
           await ctx.send(embed=embed, view=view)
     view.message = msg
 
-
     async def lobby_timer():
         await asyncio.sleep(15)
         if game.in_lobby:
@@ -473,9 +431,7 @@ async def bf_start(ctx):
 
     game.task = bot.loop.create_task(lobby_timer())
 
-# NOTE: no !bf_join (buttons only)
-
-# Make bf_begin internal (no decorator)
+# NOTE: no !bf_join – buttons handle join; bf_begin is internal
 async def bf_begin(ctx):
     """Begin the match (called by the button/timeout)."""
     chan_id = ctx.channel.id
@@ -544,7 +500,7 @@ async def run_game(ctx, game: BiteFightGame):
         game.round_num += 1
         events = []
 
-        # Apply bleed first
+        # Apply bleed first (no kill credit for bleed)
         for p in list(alive_players(game)):
             b = game.bleed.get(p.id, 0)
             if b > 0 and game.hp[p.id] > 0:
@@ -560,18 +516,19 @@ async def run_game(ctx, game: BiteFightGame):
                         player=p.display_name
                     ))
 
+        # Attackers act in random order
         attackers = list(alive_players(game))
         random.shuffle(attackers)
 
         for attacker in attackers:
             if game.hp.get(attacker.id, 0) <= 0:
-                continue
+                continue  # might have died to bleed
 
             target = pick_target(game, attacker)
             if not target:
-                break
+                break  # only one alive
 
-            do_bite = random.random() < 0.55
+            do_bite = random.random() < 0.55  # Bite vs Fight
 
             if do_bite:
                 miss = random.random() < 0.15
@@ -633,9 +590,11 @@ async def run_game(ctx, game: BiteFightGame):
         if len(alive_now) <= 1:
             winner = alive_now[0] if alive_now else None
 
+            # Compute time survived
             ended_at = datetime.datetime.utcnow()
             dur_secs = int((ended_at - game.start_time).total_seconds()) if game.start_time else 0
 
+            # Persist lifetime stats (global/server)
             stats = _load_stats()
             guild_id = ctx.guild.id if ctx.guild else "dm"
             if str(guild_id) not in stats["guilds"]:
@@ -649,10 +608,66 @@ async def run_game(ctx, game: BiteFightGame):
                     _bump(stats["guilds"][str(guild_id)]["kills"], uid, k)
             _save_stats(stats)
 
-            # Tournament accounting omitted here (unchanged)...
-            # --------------- (same as before) ---------------
+            # Tournament payout + per-tournament stats & progress
+            prize_note = ""
+            actual_prize_mode = None
+            if game.is_tournament:
+                state = _tourney_state_load()
+                tid = state.get("id")
+                actual_prize_mode = state.get("prize_mode", "credits")
+                if actual_prize_mode == "mixed":
+                    actual_prize_mode = "credits" if random.randint(1, 100) <= int(state.get("mixed_credits_pct", 70)) else "wishlist"
 
-            # Build final embed (unchanged labels)
+                if winner:
+                    if actual_prize_mode == "credits":
+                        payout = game.pot
+                        prize_note = f"Payout: {payout} credits"
+                        L = _prizes_load()
+                        L["seq"] += 1
+                        L["open"].append({
+                            "id": L["seq"], "created_at": datetime.datetime.utcnow().isoformat(),
+                            "type": "credits", "amount": payout,
+                            "winner_id": winner.id, "winner_name": winner.display_name,
+                            "guild_id": ctx.guild.id if ctx.guild else None,
+                            "tournament_id": tid
+                        })
+                        _prizes_save(L)
+                    else:
+                        L = _prizes_load()
+                        L["seq"] += 1
+                        entry = {
+                            "id": L["seq"],
+                            "created_at": datetime.datetime.utcnow().isoformat(),
+                            "type": "wishlist",
+                            "count": int(state.get("wishlist_count", 2)),
+                            "winner_id": winner.id,
+                            "winner_name": winner.display_name,
+                            "guild_id": ctx.guild.id if ctx.guild else None,
+                            "tournament_id": tid
+                        }
+                        L["open"].append(entry)
+                        _prizes_save(L)
+                        prize_note = f"Wishlist x{entry['count']} (Prize ID #{entry['id']})"
+
+                # Per-tournament stats
+                all_ts = _tourney_stats_all()
+                tstats = all_ts.get(tid) or {"wins": {}, "kills": {}, "credits_won": {}, "games": 0, "pots": 0}
+                if winner:
+                    _bump(tstats["wins"], winner.id, 1)
+                    if actual_prize_mode == "credits":
+                        _bump(tstats["credits_won"], winner.id, game.pot)
+                for uid, k in game.kills.items():
+                    if k > 0:
+                        _bump(tstats["kills"], uid, k)
+                tstats["games"] += 1
+                tstats["pots"] += game.pot
+                all_ts[tid] = tstats
+                _tourney_stats_save(all_ts)
+
+                state["games_played"] = int(state.get("games_played", 0)) + 1
+                _tourney_state_save(state)
+
+            # Build the final embed
             total_kills_this_match = sum(game.kills.values())
             wins_in_server = stats["guilds"][str(guild_id)]["wins"].get(str(winner.id), 0) if winner else 0
             wins_global = stats["global"]["wins"].get(str(winner.id), 0) if winner else 0
@@ -667,6 +682,16 @@ async def run_game(ctx, game: BiteFightGame):
                 embed.add_field(name="Wins in this server", value=f"🏆 {wins_in_server}", inline=True)
                 embed.add_field(name="Wins globally", value=f"🌍 {wins_global}", inline=True)
 
+            if game.is_tournament:
+                s = _tourney_state_load()
+                embed.add_field(name="Pot", value=f"💰 {game.pot}", inline=True)
+                embed.add_field(name="Entry per player", value=f"{game.entry_fee}", inline=True)
+                if actual_prize_mode:
+                    embed.add_field(name="Prize mode", value=actual_prize_mode.title(), inline=True)
+                if prize_note:
+                    embed.add_field(name="Prize", value=prize_note[:1024], inline=False)
+                embed.add_field(name="\u200b", value=f"Games {s.get('games_played',0)}/{s.get('games_target',0)}", inline=False)
+
             board = "\n".join(f"{p.display_name}: {game.hp.get(p.id, 0)} HP" for p in game.players) or "No combatants."
             embed.add_field(name="Final HP", value=board[:1024], inline=False)
 
@@ -675,10 +700,40 @@ async def run_game(ctx, game: BiteFightGame):
 
             await game.channel.send(embed=embed)
 
+            # Live mini-leaderboard during tournament
+            if game.is_tournament:
+                state = _tourney_state_load()
+                tid = state.get("id")
+                all_ts = _tourney_stats_all()
+                tstats = all_ts.get(tid, {})
+                ids = set(tstats.get("wins", {}).keys()) | set(tstats.get("credits_won", {}).keys()) | set(tstats.get("kills", {}).keys())
+                rows = []
+                for uid in ids:
+                    rows.append((int(uid),
+                                 tstats.get("wins", {}).get(uid, 0),
+                                 tstats.get("credits_won", {}).get(uid, 0),
+                                 tstats.get("kills", {}).get(uid, 0)))
+                rows.sort(key=lambda r: (-r[1], -r[2], -r[3]))
+                top = rows[:5]
+                if top:
+                    lines = []
+                    for i, (uid, w, c, k) in enumerate(top, start=1):
+                        mem = ctx.guild.get_member(uid)
+                        name = mem.display_name if mem else f"User {uid}"
+                        lines.append(f"{i}. {name} — Wins {w}, Credits {c}, Kills {k}")
+                    await game.channel.send(f"Current tourney leaderboard ({state.get('games_played',0)}/{state.get('games_target',0)}):\n" + "\n".join(lines))
+
+                if int(state.get("games_played", 0)) >= int(state.get("games_target", 0)) > 0:
+                    await bf_tourney_end(ctx)
+
             game.reset()
             return
 
-        # Choose a key play and build the image with greyed loser
+        # Post one embed for the round
+        if not events:
+            events.append("The fighters circle, waiting for an opening.")
+
+        # Pick a key play for the card; grey the loser side
         key_play = None
         key_attacker = None
         key_target = None
@@ -703,17 +758,12 @@ async def run_game(ctx, game: BiteFightGame):
         if key_play and key_attacker and key_target:
             try:
                 lower = key_play.lower()
-                fade_left = False
-                fade_right = False
-                if "miss" in lower:
-                    # attacker missed => attacker is "loser" of the exchange
-                    fade_left = True
-                else:
-                    # a hit/crit/bleed event => target is the loser
-                    fade_right = True
+                fade_left = "miss" in lower  # attacker missed => fade attacker
+                fade_right = not fade_left    # otherwise fade target
                 img_bytes = await build_versus_card(key_attacker, key_target, key_play, grey_left=fade_left, grey_right=fade_right)
                 file = discord.File(img_bytes, filename=f"round_{game.round_num}.png")
-            except Exception:
+            except Exception as e:
+                print(f"[Bite&Fight] build_versus_card failed: {e}")
                 file = None
 
         hp_board = ", ".join(f"{p.display_name}({game.hp[p.id]})" for p in alive_players(game))
@@ -723,8 +773,9 @@ async def run_game(ctx, game: BiteFightGame):
             color=discord.Color.dark_red(),
             timestamp=datetime.datetime.utcnow()
         )
+        label = "HP"
         embed.add_field(name="Events", value="\n".join(events)[:1024], inline=False)
-        embed.add_field(name="HP", value=hp_board[:1024], inline=False)
+        embed.add_field(name=label, value=hp_board[:1024], inline=False)
 
         if file:
             embed.set_image(url=f"attachment://round_{game.round_num}.png")
@@ -735,11 +786,8 @@ async def run_game(ctx, game: BiteFightGame):
         await asyncio.sleep(2.2)
 
 # =========================
-# (Stats / Tourney commands below are unchanged from your latest version)
-# Keep bf_profile, bf_pot, bf_set_ante, bf_tourney_start/end/lb/info,
-# bf_prize_mode, bf_prizes, bf_prize_done, on_ready, main block.
+# Stats / Pot / Tourney
 # =========================
-
 @bot.command(name="bf_profile")
 async def bf_profile(ctx, member: discord.Member = None):
     member = member or ctx.author
@@ -768,6 +816,9 @@ async def bf_pot(ctx):
         return await ctx.send("No tournament pot for casual games.")
     await ctx.send(f"Current pot: {game.pot} (Entry {game.entry_fee}). Players: {len(game.players)}.")
 
+# =========================
+# Tournament Commands
+# =========================
 @bot.command(name="bf_set_ante")
 @commands.has_permissions(administrator=True)
 async def bf_set_ante(ctx, amount: int):
@@ -785,7 +836,7 @@ async def bf_tourney_start(ctx, games: int = 10, entry: int = None, *, name: str
     tid = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     ante = int(entry) if entry is not None else CHANNEL_ANTE.get(ctx.channel.id, int(os.getenv("BF_ANTE", "100")))
     if entry is not None:
-        CHANNEL_ANTE[ctx.channel.id] = ante
+        CHANNEL_ANTE[ctx.channel.id] = ante  # remember host choice for this channel
     state.update({
         "active": True, "id": tid, "name": name or f"Tournament {tid}",
         "ante": ante, "channel_id": ctx.channel.id,
@@ -917,6 +968,19 @@ async def bf_prizes(ctx):
             lines.append(f"#{e['id']} • {e['winner_name']} • {e.get('type')}")
     await ctx.send("Open prizes:\n" + "\n".join(lines))
 
+@bot.command(name="bf_prize_done")
+@commands.has_permissions(administrator=True)
+async def bf_prize_done(ctx, prize_id: int):
+    L = _prizes_load()
+    for i, e in enumerate(L["open"]):
+        if int(e["id"]) == int(prize_id):
+            L["closed"].append(e)
+            del L["open"][i]
+            _prizes_save(L)
+            return await ctx.send(f"Marked prize #{prize_id} as delivered.")
+    await ctx.send("Prize ID not found.")
+
+# ========= Debug helpers (to verify assets & card) =========
 @bot.command(name="bf_dbg_assets")
 @commands.has_permissions(administrator=True)
 async def bf_dbg_assets(ctx):
@@ -932,33 +996,24 @@ async def bf_dbg_assets(ctx):
             lines.append(f"{d} -> ERROR: {e}")
     await ctx.send("Asset scan:\n" + "\n".join(lines))
 
-        
 @bot.command(name="bf_cardtest")
 @commands.has_permissions(administrator=True)
-async def bf_cardtest(ctx, left: discord.Member=None, right: discord.Member=None, *, text: str="Test swing!"):
+async def bf_cardtest(ctx, left: discord.Member=None, right: discord.Member=None, *, text: str="Swords check"):
     left = left or ctx.author
     right = right or ctx.author
-    # draw with swords and grey the right to make it obvious
     img = await build_versus_card(left, right, text, grey_right=True)
     await ctx.send(file=discord.File(img, filename="test_card.png"))
 
-
-@bot.command(name="bf_prize_done")
-@commands.has_permissions(administrator=True)
-async def bf_prize_done(ctx, prize_id: int):
-    L = _prizes_load()
-    for i, e in enumerate(L["open"]):
-        if int(e["id"]) == int(prize_id):
-            L["closed"].append(e)
-            del L["open"][i]
-            _prizes_save(L)
-            return await ctx.send(f"Marked prize #{prize_id} as delivered.")
-    await ctx.send("Prize ID not found.")
-
+# =========================
+# Lifecycle
+# =========================
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} with prefix {PREFIX}")
 
+# =========================
+# Entry
+# =========================
 if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Set DISCORD_TOKEN env var.")
