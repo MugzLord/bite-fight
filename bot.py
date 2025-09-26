@@ -861,8 +861,8 @@ async def run_game(ctx, game: BiteFightGame):
                 # reflect progress on the active tournament
                 state["games_played"] = int(state.get("games_played", 0)) + 1
                 _tourney_state_save(state)
--
-            # ---------- Winner card (Pixxie-style) ----------
+
+            # ---------- Winner card  ----------
             total_kills_this_match = sum(game.kills.values())
             wins_in_server = stats["guilds"][str(guild_id)]["wins"].get(str(winner.id), 0) if winner else 0
             wins_global = stats["global"]["wins"].get(str(winner.id), 0) if winner else 0
