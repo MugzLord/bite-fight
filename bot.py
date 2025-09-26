@@ -489,7 +489,7 @@ async def bf_begin(ctx):
 
     # Pixxie-style intro card (names only; no HP)
     intro = line("intro", game.banter) or "A hush falls. Then the roar. Time to settle scores."
-    names_only = "\n".join(p.display_name for p in game.players) or "No tributes"
+    names_only = "\n".join(p.display_name for p in game.players) or "No challengers"
 
     embed = discord.Embed(
         title="May the odds be ever in your flavor!",
@@ -497,7 +497,7 @@ async def bf_begin(ctx):
         color=discord.Color.dark_gold(),
         timestamp=datetime.datetime.utcnow()
     )
-    embed.add_field(name=f"🍔 {len(game.players)} tributes",
+    embed.add_field(name=f"🍔 {len(game.players)} challengers on the menu",
                     value=f"```{names_only}```",
                     inline=False)
 
@@ -644,14 +644,17 @@ async def run_game(ctx, game: BiteFightGame):
         if len(alive_now) <= 1:
             winner = alive_now[0] if alive_now else None
         
-            # --- 1) POST FINAL ROUND SUMMARY FIRST ---
+           
             # Pick a key play/image just like the normal rounds
+            # --- Choose a key play and (optionally) build the versus card ---
             key_play = None
             key_attacker = None
             key_target = None
+            file = None  # <-- important: initialize so it's always defined
+    
             for e in reversed(events):
                 found = False
-                for a in alive_players(game) + [p for p in game.players if p not in alive_players(game)]:
+                for a in alive_players(game):
                     for t in game.players:
                         if a.id == t.id:
                             continue
@@ -665,41 +668,39 @@ async def run_game(ctx, game: BiteFightGame):
                         break
                 if found:
                     break
-            #  
-            file = None
+    
             if key_play and key_attacker and key_target:
                 try:
+                    # simple rule: if miss is mentioned, attacker is the "loser" of the moment
                     lower = key_play.lower()
-            
-                    # 1) Decide winner/loser for THIS play
-                    # miss  -> attacker loses the exchange
-                    # hit/crit/bleed -> target loses the exchange
-                    if "miss" in lower:
-                        loser  = key_attacker
-                        winner = key_target
-                    else:
-                        loser  = key_target
-                        winner = key_attacker
-            
-                    # 2) Randomize sides: winner on left ~50% of the time
-                    winner_left = random.choice([True, False])
-                    if winner_left:
-                        left_member, right_member = winner, loser
-                        grey_left, grey_right    = False, True   # loser on right
-                    else:
-                        left_member, right_member = loser, winner
-                        grey_left, grey_right     = True, False  # loser on left
-            
-                    # 3) Build the card (swords + logo are drawn inside this)
+                    fade_left = "miss" in lower
+                    fade_right = not fade_left
+    
                     img_bytes = await build_versus_card(
-                        left_member, right_member, key_play,
-                        grey_left=grey_left, grey_right=grey_right
+                        key_attacker, key_target, key_play,
+                        grey_left=fade_left, grey_right=fade_right
                     )
                     file = discord.File(img_bytes, filename=f"round_{game.round_num}.png")
-                except Exception:
+                except Exception as e:
+                    print("[Bite&Fight] card build failed:", e)
                     file = None
 
+        # --- Build & send the round embed ---
+        hp_board = ", ".join(f"{p.display_name}({game.hp[p.id]})" for p in alive_players(game))
+        embed = discord.Embed(
+            title=f"Bite & Fight — Round {game.round_num}",
+            description=line("round_intro", game.banter) or "",
+            color=discord.Color.dark_red(),
+            timestamp=datetime.datetime.utcnow()
+        )
+        embed.add_field(name="Events", value="\n".join(events)[:1024], inline=False)
+        embed.add_field(name="HP", value=hp_board[:1024], inline=False)
 
+        if file is not None:
+            embed.set_image(url=f"attachment://round_{game.round_num}.png")
+            await game.channel.send(embed=embed, file=file)
+        else:
+            await game.channel.send(embed=embed)
 
         
             hp_board = ", ".join(f"{p.display_name}({game.hp[p.id]})" for p in game.players)
