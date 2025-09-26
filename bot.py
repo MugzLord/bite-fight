@@ -22,10 +22,9 @@ INTENTS.members = True
 
 # Files
 STATS_FILE = os.getenv("BF_STATS_FILE", "bf_stats.json")                 # global/server wins/kills
-WALLETS_FILE = os.getenv("BF_WALLETS_FILE", "bf_wallets.json")           # user balances
 TOURNEY_STATE_FILE = os.getenv("BF_TOURNEY_STATE", "bf_tourney.json")    # current tournament state
 TOURNEY_STATS_FILE = os.getenv("BF_TOURNEY_STATS", "bf_tourney_stats.json")  # per-tournament stats
-PRIZES_FILE = os.getenv("BF_PRIZES_FILE", "bf_prizes.json")              # wishlist prize ledger
+PRIZES_FILE = os.getenv("BF_PRIZES_FILE", "bf_prizes.json")              # wishlist/credit prize ledger
 
 # Per-channel default ante (used when starting a new tournament)
 CHANNEL_ANTE = defaultdict(lambda: int(os.getenv("BF_ANTE", "100")))
@@ -60,26 +59,6 @@ def _bump(dct, key, by=1):
     key = str(key)
     dct[key] = dct.get(key, 0) + by
 
-# Wallets
-def _wallets_load():
-    return _json_load(WALLETS_FILE, {})
-
-def _wallets_save(d):
-    _json_save(WALLETS_FILE, d)
-
-def wallet_get(user_id: int) -> int:
-    d = _wallets_load()
-    return int(d.get(str(user_id), 0))
-
-def wallet_add(user_id: int, delta: int) -> int:
-    d = _wallets_load()
-    k = str(user_id)
-    d[k] = int(d.get(k, 0)) + int(delta)
-    if d[k] < 0:
-        d[k] = 0
-    _wallets_save(d)
-    return d[k]
-
 # Tournament state & stats
 def _tourney_state_load():
     return _json_load(TOURNEY_STATE_FILE, {
@@ -100,12 +79,20 @@ def _tourney_stats_all():
 def _tourney_stats_save(all_stats):
     _json_save(TOURNEY_STATS_FILE, all_stats)
 
-# Prize ledger (wishlist only records count—no item names)
+# Prize ledger
 def _prizes_load():
     return _json_load(PRIZES_FILE, {"seq": 0, "open": [], "closed": []})
 
 def _prizes_save(d):
     _json_save(PRIZES_FILE, d)
+
+# Find a local asset by possible names
+def _find_asset(names):
+    for n in names:
+        p = os.path.join("assets", n)
+        if os.path.exists(p):
+            return p
+    return None
 
 # =========================
 # Bot
@@ -121,7 +108,7 @@ class BiteFightGame:
         self.running = False
         self.players = []                # list[discord.Member]
         self.hp = {}                     # member_id -> int
-        self.bleed = defaultdict(int)    # member_id -> bleed stacks (damage per round)
+        self.bleed = defaultdict(int)    # member_id -> bleed stacks
         self.round_num = 0
         self.max_hp = 100
         self.task = None
@@ -139,7 +126,7 @@ class BiteFightGame:
         self.is_tournament = bool(state.get("active", False))
         self.entry_fee = int(state.get("ante", 100)) if self.is_tournament else 0
         self.pot = 0
-        self.buyins = {}                 # user_id -> amount paid (this game)
+        self.buyins = {}                 # user_id -> amount (for display only)
 
     def reset(self):
         self.in_lobby = False
@@ -193,7 +180,6 @@ class LobbyView(discord.ui.View):
         count = len(self.game.players)
         status_line = f"⚔️ {count} tribute{'s' if count != 1 else ''} have volunteered"
 
-        # helper to set/add a field
         def set_field(name, value):
             for i, f in enumerate(embed.fields):
                 if f.name == name:
@@ -220,18 +206,10 @@ class LobbyView(discord.ui.View):
         if user in self.game.players:
             return await interaction.response.send_message("You are already in.", ephemeral=True)
 
-        # Tournament buy-in
+        # Tournament: auto-add entry to pot (no balances)
         if self.game.is_tournament:
-            fee = self.game.entry_fee
-            bal = wallet_get(user.id)
-            if bal < fee:
-                need = fee - bal
-                return await interaction.response.send_message(
-                    f"Not enough credits to join. Need {need} more (entry {fee}).", ephemeral=True
-                )
-            wallet_add(user.id, -fee)
-            self.game.pot += fee
-            self.game.buyins[user.id] = self.game.buyins.get(user.id, 0) + fee
+            self.game.pot += self.game.entry_fee
+            self.game.buyins[user.id] = self.game.buyins.get(user.id, 0) + self.game.entry_fee
 
         self.game.players.append(user)
         self.game.hp[user.id] = self.game.max_hp
@@ -389,7 +367,14 @@ async def bf_start(ctx):
     subtitle = "Part 1 - Setting The Table"
     desc = "🍔 to join the fight!\n🍽️ to let the battle begin!"
     embed = discord.Embed(title=title, description=f"**{subtitle}**\n\n{desc}", color=discord.Color.dark_gold())
-    embed.set_thumbnail(url="https://i.imgur.com/4Zb9o2p.png")  # placeholder badge
+
+    # attach a local logo as thumbnail if available
+    thumb_file = None
+    logo_path = _find_asset(["logo.png", "logo.jpg", "logo.jpeg"])
+    if logo_path:
+        embed.set_thumbnail(url="attachment://logo.png")
+        thumb_file = discord.File(logo_path, filename="logo.png")
+
     embed.add_field(name="Status", value="⚔️ 0 tributes have volunteered", inline=False)
     if game.is_tournament:
         embed.add_field(name="Pot", value=f"💰 {game.pot} • Entry {game.entry_fee}", inline=False)
@@ -397,7 +382,11 @@ async def bf_start(ctx):
 
     view = LobbyView(game, host=ctx.author, timeout=30.0)
     game.lobby_view = view
-    msg = await ctx.send(embed=embed, view=view)
+
+    if thumb_file:
+        msg = await ctx.send(embed=embed, view=view, file=thumb_file)
+    else:
+        msg = await ctx.send(embed=embed, view=view)
     view.message = msg
 
     async def lobby_timer():
@@ -411,50 +400,17 @@ async def bf_start(ctx):
 
     game.task = bot.loop.create_task(lobby_timer())
 
-@bot.command(name="bf_join")
-async def bf_join(ctx):
-    """Fallback text command to join (does buy-in during tournaments)."""
-    chan_id = ctx.channel.id
-    game = GAMES.get(chan_id)
-    if not game or not game.in_lobby:
-        return await ctx.reply("No open lobby. Start one with !bf_start")
-    if ctx.author in game.players:
-        return await ctx.reply("You are already in.")
-    if ctx.author.bot:
-        return
+# NOTE: removed the !bf_join text command (buttons only)
 
-    if game.is_tournament:
-        fee = game.entry_fee
-        bal = wallet_get(ctx.author.id)
-        if bal < fee:
-            need = fee - bal
-            return await ctx.reply(f"Not enough credits to join. Need {need} more (entry {fee}).")
-        wallet_add(ctx.author.id, -fee)
-        game.pot += fee
-        game.buyins[ctx.author.id] = game.buyins.get(ctx.author.id, 0) + fee
-
-    game.players.append(ctx.author)
-    game.hp[ctx.author.id] = game.max_hp
-
-    joined_line = line("on_join", game.banter)
-    await ctx.send(format_line(joined_line, player=ctx.author.display_name) if joined_line else f"{ctx.author.display_name} joined the arena.")
-    if game.lobby_view:
-        await game.lobby_view.update_counter()
-
-@bot.command(name="bf_begin")
+# Make bf_begin internal (no command decorator)
 async def bf_begin(ctx):
-    """Force start the game (if lobby is open)."""
+    """Begin the match (called by the button/timeout)."""
     chan_id = ctx.channel.id
     game = GAMES.get(chan_id)
     if not game or not game.in_lobby:
         return await ctx.reply("No open lobby to begin.")
     if len(game.players) < 2:
         await ctx.send("Not enough players joined. Cancelling.")
-        # refund if it was a tournament lobby
-        if game.is_tournament and game.buyins:
-            for uid, amt in game.buyins.items():
-                wallet_add(uid, amt)
-            await ctx.send(f"Lobby cancelled. Refunded {sum(game.buyins.values())} credits.")
         game.reset()
         return
 
@@ -473,8 +429,8 @@ async def bf_begin(ctx):
     roster = "\n".join(f"• {p.display_name} — {game.max_hp} HP" for p in game.players)
     embed.add_field(name="Combatants", value=roster, inline=False)
     if game.is_tournament:
-        embed.add_field(name="Pot", value=f"💰 {game.pot} • Entry {game.entry_fee}", inline=True)
         s = _tourney_state_load()
+        embed.add_field(name="Pot", value=f"💰 {game.pot} • Entry {game.entry_fee}", inline=True)
         embed.add_field(name="Prize mode", value=s.get("prize_mode", "credits").title(), inline=True)
     await ctx.send(embed=embed)
 
@@ -487,33 +443,24 @@ async def bf_stop(ctx):
     game = GAMES.get(chan_id)
     if not game or not (game.in_lobby or game.running):
         return await ctx.reply("No active game in this channel.")
-    if game.in_lobby and game.is_tournament and game.buyins:
-        for uid, amt in game.buyins.items():
-            wallet_add(uid, amt)
-        await ctx.send(f"Lobby cancelled. Refunded {sum(game.buyins.values())} credits.")
     game.reset()
     await ctx.send("Game stopped.")
 
 @bot.command(name="bf_help")
 async def bf_help(ctx):
     msg = (
-        f"**Bite & Fight Commands**\n"
-        f"{PREFIX}bf_start — open a lobby (30s join window)\n"
-        f"{PREFIX}bf_join — join the lobby\n"
-        f"{PREFIX}bf_begin — force begin the match\n"
+        f"**Bite & Fight — Commands**\n"
+        f"{PREFIX}bf_start — open a lobby (buttons handle Join/Start)\n"
         f"{PREFIX}bf_stop — stop the current game\n"
-        f"{PREFIX}bf_wallet [@user] — show balance\n"
-        f"{PREFIX}bf_grant @user <amount> — admin give credits\n"
-        f"{PREFIX}bf_set_ante <amount> — admin set entry fee for next tournament\n"
-        f"{PREFIX}bf_tourney_start <games> [name] — start a tournament\n"
-        f"{PREFIX}bf_tourney_end — end and publish final leaderboard\n"
+        f"{PREFIX}bf_tourney_start <games> <entry> [name] — start a tournament\n"
+        f"{PREFIX}bf_tourney_end — end & publish final leaderboard\n"
         f"{PREFIX}bf_tourney_lb — show current leaderboard\n"
         f"{PREFIX}bf_tourney_info — show tournament progress\n"
         f"{PREFIX}bf_prize_mode <credits|wishlist|mixed> [credits%] [wishlistCount]\n"
-        f"{PREFIX}bf_prizes / {PREFIX}bf_prize_done <id> — admin prize ledger\n"
+        f"{PREFIX}bf_prizes / {PREFIX}bf_prize_done <id> — manage prize log\n"
         f"{PREFIX}bf_pot — show current pot (if tournament)\n"
-        f"{PREFIX}bf_profile — your lifetime wins/kills\n\n"
-        "Rounds are automatic. One embed per round keeps the channel tidy."
+        f"{PREFIX}bf_profile — your lifetime wins/kills\n"
+        f"{PREFIX}bf_set_ante <amount> — set default entry for the next tournament\n"
     )
     await ctx.send(msg)
 
@@ -643,17 +590,25 @@ async def run_game(ctx, game: BiteFightGame):
                 if actual_prize_mode == "mixed":
                     actual_prize_mode = "credits" if random.randint(1, 100) <= int(state.get("mixed_credits_pct", 70)) else "wishlist"
 
-                # Pay credits pot OR log wishlist xN
                 if winner:
                     if actual_prize_mode == "credits":
                         payout = game.pot
-                        wallet_add(winner.id, payout)
-                        prize_note = f"Payout: {payout}"
+                        prize_note = f"Payout: {payout} credits"
+                        L = _prizes_load()
+                        L["seq"] += 1
+                        L["open"].append({
+                            "id": L["seq"], "created_at": datetime.datetime.utcnow().isoformat(),
+                            "type": "credits", "amount": payout,
+                            "winner_id": winner.id, "winner_name": winner.display_name,
+                            "guild_id": ctx.guild.id if ctx.guild else None,
+                            "tournament_id": tid
+                        })
+                        _prizes_save(L)
                     else:
-                        ledger = _prizes_load()
-                        ledger["seq"] += 1
+                        L = _prizes_load()
+                        L["seq"] += 1
                         entry = {
-                            "id": ledger["seq"],
+                            "id": L["seq"],
                             "created_at": datetime.datetime.utcnow().isoformat(),
                             "type": "wishlist",
                             "count": int(state.get("wishlist_count", 2)),
@@ -662,8 +617,8 @@ async def run_game(ctx, game: BiteFightGame):
                             "guild_id": ctx.guild.id if ctx.guild else None,
                             "tournament_id": tid
                         }
-                        ledger["open"].append(entry)
-                        _prizes_save(ledger)
+                        L["open"].append(entry)
+                        _prizes_save(L)
                         prize_note = f"Wishlist x{entry['count']} (Prize ID #{entry['id']})"
 
                 # Per-tournament stats
@@ -681,7 +636,6 @@ async def run_game(ctx, game: BiteFightGame):
                 all_ts[tid] = tstats
                 _tourney_stats_save(all_ts)
 
-                # Progress: bump games_played and maybe auto-end
                 state["games_played"] = int(state.get("games_played", 0)) + 1
                 _tourney_state_save(state)
 
@@ -700,10 +654,8 @@ async def run_game(ctx, game: BiteFightGame):
                 embed.add_field(name="Wins in this server", value=f"🏆 {wins_in_server}", inline=True)
                 embed.add_field(name="Wins globally", value=f"🌍 {wins_global}", inline=True)
 
-            # Tournament fields
             if game.is_tournament:
                 s = _tourney_state_load()
-                label = "Creds"
                 embed.add_field(name="Pot", value=f"💰 {game.pot}", inline=True)
                 embed.add_field(name="Entry per player", value=f"{game.entry_fee}", inline=True)
                 if actual_prize_mode:
@@ -712,18 +664,15 @@ async def run_game(ctx, game: BiteFightGame):
                     embed.add_field(name="Prize", value=prize_note[:1024], inline=False)
                 embed.add_field(name="\u200b", value=f"Games {s.get('games_played',0)}/{s.get('games_target',0)}", inline=False)
 
-            # Final HP/Creds table
-            board_label = "Creds" if game.is_tournament else "HP"
-            board = "\n".join(f"{p.display_name}: {game.hp.get(p.id, 0)} {board_label}" for p in game.players) or "No combatants."
-            embed.add_field(name=f"Final {board_label}", value=board[:1024], inline=False)
+            # Always label as HP (these numbers are health)
+            board = "\n".join(f"{p.display_name}: {game.hp.get(p.id, 0)} HP" for p in game.players) or "No combatants."
+            embed.add_field(name="Final HP", value=board[:1024], inline=False)
 
-            # Attach last round summary
             if events:
                 embed.add_field(name=f"Round {game.round_num} Summary", value="\n".join(events)[:1024], inline=False)
 
             await game.channel.send(embed=embed)
 
-            # Mini leaderboard (current tournament)
             if game.is_tournament:
                 state = _tourney_state_load()
                 tid = state.get("id")
@@ -746,7 +695,6 @@ async def run_game(ctx, game: BiteFightGame):
                         lines.append(f"{i}. {name} — Wins {w}, Credits {c}, Kills {k}")
                     await game.channel.send(f"Current tourney leaderboard ({state.get('games_played',0)}/{state.get('games_target',0)}):\n" + "\n".join(lines))
 
-                # Auto end if target reached
                 if int(state.get("games_played", 0)) >= int(state.get("games_target", 0)) > 0:
                     await bf_tourney_end(ctx)
 
@@ -757,7 +705,7 @@ async def run_game(ctx, game: BiteFightGame):
         if not events:
             events.append("The fighters circle, waiting for an opening.")
 
-        # Pick a key play to illustrate
+        # Try to pick a key play to illustrate
         key_play = None
         key_attacker = None
         key_target = None
@@ -787,7 +735,6 @@ async def run_game(ctx, game: BiteFightGame):
                 file = None
 
         hp_board = ", ".join(f"{p.display_name}({game.hp[p.id]})" for p in alive_players(game))
-        label = "Creds" if game.is_tournament else "HP"
         embed = discord.Embed(
             title=f"Bite & Fight — Round {game.round_num}",
             description=line("round_intro", game.banter) or "",
@@ -795,7 +742,7 @@ async def run_game(ctx, game: BiteFightGame):
             timestamp=datetime.datetime.utcnow()
         )
         embed.add_field(name="Events", value="\n".join(events)[:1024], inline=False)
-        embed.add_field(name=label, value=hp_board[:1024], inline=False)
+        embed.add_field(name="HP", value=hp_board[:1024], inline=False)
 
         if file:
             embed.set_image(url=f"attachment://round_{game.round_num}.png")
@@ -806,7 +753,7 @@ async def run_game(ctx, game: BiteFightGame):
         await asyncio.sleep(2.2)
 
 # =========================
-# Stats / Wallet / Pot
+# Stats / Pot / Tourney
 # =========================
 @bot.command(name="bf_profile")
 async def bf_profile(ctx, member: discord.Member = None):
@@ -827,29 +774,6 @@ async def bf_profile(ctx, member: discord.Member = None):
     embed.add_field(name="Kills (global)", value=f"{kills_global}", inline=True)
     await ctx.send(embed=embed)
 
-@bot.command(name="bf_wallet")
-async def bf_wallet(ctx, member: discord.Member = None):
-    member = member or ctx.author
-    bal = wallet_get(member.id)
-    await ctx.send(f"{member.display_name} has {bal} credits.")
-
-@bot.command(name="bf_grant")
-@commands.has_permissions(administrator=True)
-async def bf_grant(ctx, member: discord.Member, amount: int):
-    if amount == 0:
-        return await ctx.send("Amount must be non-zero.")
-    bal = wallet_add(member.id, amount)
-    sign = "+" if amount > 0 else ""
-    await ctx.send(f"Granted {sign}{amount} to {member.display_name}. New balance: {bal}.")
-
-@bot.command(name="bf_set_ante")
-@commands.has_permissions(administrator=True)
-async def bf_set_ante(ctx, amount: int):
-    if amount < 1 or amount > 10_000_000:
-        return await ctx.send("Ante must be between 1 and 10,000,000.")
-    CHANNEL_ANTE[ctx.channel.id] = amount
-    await ctx.send(f"Entry fee set to {amount} credits for the next tournament in this channel.")
-
 @bot.command(name="bf_pot")
 async def bf_pot(ctx):
     game = GAMES.get(ctx.channel.id)
@@ -862,17 +786,28 @@ async def bf_pot(ctx):
 # =========================
 # Tournament Commands
 # =========================
+@bot.command(name="bf_set_ante")
+@commands.has_permissions(administrator=True)
+async def bf_set_ante(ctx, amount: int):
+    if amount < 1 or amount > 10_000_000:
+        return await ctx.send("Entry must be between 1 and 10,000,000.")
+    CHANNEL_ANTE[ctx.channel.id] = amount
+    await ctx.send(f"Entry fee set to {amount} credits for the next tournament in this channel.")
+
 @bot.command(name="bf_tourney_start")
 @commands.has_permissions(administrator=True)
-async def bf_tourney_start(ctx, games: int = 10, *, name: str = None):
+async def bf_tourney_start(ctx, games: int = 10, entry: int = None, *, name: str = None):
+    """Start a tournament. Example: !bf_tourney_start 10 50 Bite & Fight Cup"""
     state = _tourney_state_load()
     if state.get("active"):
         return await ctx.send("A tournament is already active. End it with !bf_tourney_end.")
     tid = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    ante = CHANNEL_ANTE.get(ctx.channel.id, int(os.getenv("BF_ANTE", "100")))
+    ante = int(entry) if entry is not None else CHANNEL_ANTE.get(ctx.channel.id, int(os.getenv("BF_ANTE", "100")))
+    if entry is not None:
+        CHANNEL_ANTE[ctx.channel.id] = ante  # remember host choice for this channel
     state.update({
         "active": True, "id": tid, "name": name or f"Tournament {tid}",
-        "ante": int(ante), "channel_id": ctx.channel.id,
+        "ante": ante, "channel_id": ctx.channel.id,
         "created_at": datetime.datetime.utcnow().isoformat(),
         "games_target": int(games), "games_played": 0,
         "prize_mode": "credits", "wishlist_count": 2, "mixed_credits_pct": 70
@@ -995,6 +930,8 @@ async def bf_prizes(ctx):
     for e in L["open"][:15]:
         if e["type"] == "wishlist":
             lines.append(f"#{e['id']} • {e['winner_name']} • Wishlist x{e.get('count', 2)}")
+        elif e["type"] == "credits":
+            lines.append(f"#{e['id']} • {e['winner_name']} • {e.get('amount',0)} credits")
         else:
             lines.append(f"#{e['id']} • {e['winner_name']} • {e.get('type')}")
     await ctx.send("Open prizes:\n" + "\n".join(lines))
