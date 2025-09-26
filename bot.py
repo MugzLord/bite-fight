@@ -640,18 +640,23 @@ async def run_game(ctx, game: BiteFightGame):
                     break
         
             file = None
+            file = None
             if key_play and key_attacker and key_target:
                 try:
                     lower = key_play.lower()
-                    fade_left = "miss" in lower             # attacker missed => grey attacker
-                    fade_right = not fade_left              # otherwise grey target (took the hit)
-                    img_bytes = await build_versus_card(
-                        key_attacker, key_target, key_play,
-                        grey_left=fade_left, grey_right=fade_right
-                    )
+                    fade_left = False
+                    fade_right = False
+                    if "miss" in lower:
+                        # attacker missed => attacker is "loser" of the exchange
+                        fade_left = True
+                    else:
+                        # a hit/crit/bleed event => target is the loser
+                        fade_right = True
+                    img_bytes = await build_versus_card(key_attacker, key_target, key_play, grey_left=fade_left, grey_right=fade_right)
                     file = discord.File(img_bytes, filename=f"round_{game.round_num}.png")
                 except Exception:
                     file = None
+
         
             hp_board = ", ".join(f"{p.display_name}({game.hp[p.id]})" for p in game.players)
             final_round = discord.Embed(
