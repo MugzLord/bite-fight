@@ -457,45 +457,50 @@ async def bf_start(ctx):
 
     game.task = bot.loop.create_task(lobby_timer())
 
-# NOTE: bf_begin is INTERNAL (called by the lobby timer or a button). Do NOT decorate.
+# NOTE: no !bf_join – buttons handle join; bf_begin is internal
 async def bf_begin(ctx):
-    """Begin the match (called by the lobby timer/button)."""
+    """Begin the match (called by the button/timeout)."""
     chan_id = ctx.channel.id
     game = GAMES.get(chan_id)
-    if not game or not game.in_lobby:
-        await ctx.reply("No open lobby to begin.")
-        return
 
-    # Require at least 2 players
+    # guards
+    if not game or not game.in_lobby:
+        return
     if len(game.players) < 2:
         await ctx.send("Not enough players joined. Cancelling.")
         game.reset()
         return
 
-    # Flip state
+    # flip state
     game.in_lobby = False
     game.running = True
     game.round_num = 0
     game.start_time = datetime.datetime.utcnow()
 
-    # ---- Pixxie-style "Part 2" announcement (names only) ----
+    # disable lobby buttons if that message still exists
+    if game.lobby_view and game.lobby_view.message:
+        try:
+            for c in game.lobby_view.children:
+                if isinstance(c, discord.ui.Button):
+                    c.disabled = True
+            await game.lobby_view.message.edit(view=game.lobby_view)
+        except Exception:
+            pass
+
+    # Pixxie-style intro card (names only; no HP)
     intro = line("intro", game.banter) or "A hush falls. Then the roar. Time to settle scores."
+    names_only = "\n".join(p.display_name for p in game.players) or "No tributes"
+
     embed = discord.Embed(
         title="May the odds be ever in your flavor!",
         description=f"**Part 2 - The Battle Begins...**\n{intro}",
         color=discord.Color.dark_gold(),
         timestamp=datetime.datetime.utcnow()
     )
+    embed.add_field(name=f"🍔 {len(game.players)} tributes",
+                    value=f"```{names_only}```",
+                    inline=False)
 
-    # Show challengers(names only, no HP)
-    names_only = "\n".join(p.display_name for p in game.players) or "No tributes"
-    embed.add_field(
-        name=f"🍔 {len(game.players)} tributes",
-        value=f"```{names_only}```",
-        inline=False
-    )
-
-    # Tournament extras
     if game.is_tournament:
         s = _tourney_state_load()
         embed.add_field(name="Pot", value=f"💰 {game.pot} (Entry {game.entry_fee})", inline=True)
@@ -503,10 +508,14 @@ async def bf_begin(ctx):
 
     embed.set_footer(text=f"Host: {ctx.author.display_name}")
     await ctx.send(embed=embed)
-    # ----------------------------------------------------------
 
-    # Kick off the rounds
-    await run_game(ctx, game)
+    # run rounds; if anything blows up, show it so it doesn't look "stuck"
+    try:
+        await run_game(ctx, game)
+    except Exception as e:
+        game.reset()
+        await ctx.send(f"⚠️ Game crashed: `{e}`")
+
 
 
 
