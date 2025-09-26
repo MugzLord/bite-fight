@@ -378,7 +378,7 @@ async def bf_start(ctx):
     embed.add_field(name="Status", value="⚔️ 0 tributes have volunteered", inline=False)
     if game.is_tournament:
         embed.add_field(name="Pot", value=f"💰 {game.pot} • Entry {game.entry_fee}", inline=False)
-    embed.set_footer(text=f"Host: {ctx.author.display_name} • Lobby closes in 30s")
+    embed.set_footer(text=f"Host: {ctx.author.display_name} • Lobby closes in 60s")
 
     view = LobbyView(game, host=ctx.author, timeout=30.0)
     game.lobby_view = view
