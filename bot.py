@@ -531,8 +531,35 @@ async def bf_begin(ctx):
     except Exception as e:
         game.reset()
         await ctx.send(f"⚠️ Game crashed: `{e}`")
+        
+async def build_profile_card(member: discord.Member) -> BytesIO:
+    # simple card: rounded avatar + name
+    try:
+        b = await member.display_avatar.replace(size=512, format="png").read()
+        av = Image.open(BytesIO(b)).convert("RGBA")
+    except Exception:
+        av = Image.new("RGBA", (512, 512), (40, 40, 40, 255))
+    av = av.resize((512, 512), Image.LANCZOS)
 
+    m = Image.new("L", (512, 512), 0)
+    ImageDraw.Draw(m).rounded_rectangle((0, 0, 512, 512), radius=40, fill=255)
+    av.putalpha(m)
 
+    W, H = 900, 500
+    canvas = Image.new("RGBA", (W, H), (20, 20, 24, 255))
+    canvas.paste(av, (32, 32), av)
+
+    draw = ImageDraw.Draw(canvas)
+    try:
+        fnt = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 44)
+    except Exception:
+        fnt = ImageFont.load_default()
+    draw.text((560, 60), member.display_name, fill=(255, 255, 255, 255), font=fnt)
+
+    buf = BytesIO()
+    canvas.convert("RGB").save(buf, format="PNG", optimize=True)
+    buf.seek(0)
+    return buf
 
 
 @bot.command(name="bf_stop")
@@ -759,8 +786,9 @@ async def run_game(ctx, game: BiteFightGame):
             # show the winner's profile picture on the card
             if winner:
                 av = winner.display_avatar.replace(size=256, static_format="png").url
-                embed.set_thumbnail(url=av)                          # top-right avatar
-                embed.set_author(name=winner.display_name, icon_url=av)
+                w_embed.set_thumbnail(url=av)                       # use w_embed here
+                w_embed.set_author(name=winner.display_name, icon_url=av)
+            
 
             # small logo/mark on the card (if you have logo.png in assets/)
             files_to_send = []
@@ -775,9 +803,21 @@ async def run_game(ctx, game: BiteFightGame):
                 # If you want a BIG hero image instead, use:
                 # w_embed.set_image(url="attachment://winner.png")
             
-            await game.channel.send(embed=w_embed, files=files_to_send or None)
-            # ---------- end winner card ----------
-
+           # add a View Profile button on the winner card
+            view = discord.ui.View(timeout=None)
+            if winner:
+                view.add_item(discord.ui.Button(
+                    label="View Profile",
+                    style=discord.ButtonStyle.primary,
+                    custom_id=f"bf_profile:{winner.id}",
+                ))
+            
+            if files_to_send:
+                await game.channel.send(embed=w_embed, files=files_to_send, view=view)
+            else:
+                await game.channel.send(embed=w_embed, view=view)
+            
+            
 
             game.reset()
             return
@@ -1004,6 +1044,21 @@ async def bf_cardtest(ctx, left: discord.Member=None, right: discord.Member=None
     right = right or ctx.author
     img = await build_versus_card(left, right, text, grey_right=True)
     await ctx.send(file=discord.File(img, filename="test_card.png"))
+    
+@bot.event
+async def on_interaction(interaction: discord.Interaction):
+    data = interaction.data or {}
+    cid = data.get("custom_id", "")
+    if interaction.type.name == "component" and cid.startswith("bf_profile:"):
+        uid = int(cid.split(":")[1])
+        member = interaction.guild.get_member(uid) or await interaction.client.fetch_user(uid)
+
+        # reuse your existing profile builder
+        buf = await build_profile_card(member)
+        file = discord.File(buf, filename="profile.png")
+
+        # show profile to the clicker; ephemeral = only they see it
+        await interaction.response.send_message(file=file, ephemeral=True)
 
 # =========================
 # Lifecycle
