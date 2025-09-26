@@ -644,11 +644,14 @@ def hp_bar(cur: int, max_hp: int, width: int = 18) -> str:
     return "▰" * filled + "▱" * (width - filled)
 
 def brand_embed(embed: discord.Embed, files_list=None):
-    """Attach Bite & Fight logo as FOOTER ICON without touching thumbnail."""
+    """Attach Bite & Fight logo as a SMALL THUMBNAIL (top-right)."""
     path = find_asset(["logo.png", "logo.jpg", "logo.jpeg"])
     files = list(files_list or [])
-    if not path:
-        return embed, files
+    if path:
+        files.append(discord.File(path, filename="bf_logo.png"))
+        embed.set_thumbnail(url="attachment://bf_logo.png")
+    return embed, files
+
 
     files.append(discord.File(path, filename="bf_logo.png"))
     # preserve whatever footer text you already set
@@ -807,6 +810,16 @@ async def run_game(ctx, game: BiteFightGame):
             except Exception:
                 file = None  # never crash a round just for the art
 
+                # -------- post the round (single embed per round) --------
+                embed = discord.Embed(
+                    title=f"Bite & Fight — Round {game.round_num}",
+                    description=line("round_intro", game.banter) or "",
+                    color=discord.Color.dark_red(),
+                    timestamp=datetime.datetime.utcnow()
+                )
+                embed.add_field(name="Events", value="\n".join(events)[:1024], inline=False)
+
+
      
         # pretty life bars for ALL players (alive or 0 HP)
         lines_hp = []
@@ -910,16 +923,10 @@ async def run_game(ctx, game: BiteFightGame):
             # winner avatar on the embed (use w_embed, not embed)
             if winner:
                 av = winner.display_avatar.replace(size=256, static_format="png").url
-                w_embed.set_thumbnail(url=av)
+                #w_embed.set_thumbnail(url=av)
                 w_embed.set_author(name=winner.display_name, icon_url=av)
             
-            # optional logo as BIG image (keeps avatar as thumbnail)
-            files_to_send = []
-            logo_path = find_asset(["winner.png", "victory.png", "logo.png"])
-            if logo_path:
-                files_to_send.append(discord.File(logo_path, filename="winner.png"))
-                w_embed.set_image(url="attachment://winner.png")
-
+            
             w_embed, files_to_send = brand_embed(w_embed, files_to_send)
             
             # --- POST PROFILE IMAGE ABOVE THE WINNER EMBED (uses versus_bg via build_profile_card)
