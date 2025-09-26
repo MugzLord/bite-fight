@@ -10,6 +10,7 @@ import discord
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance
 
+
 # =========================
 # Config / Env
 # =========================
@@ -289,10 +290,12 @@ async def build_versus_card(
     target: discord.Member,
     action_text: str,
     grey_left: bool = False,
-    grey_right: bool = False
+    grey_right: bool = False,
 ) -> BytesIO:
     W, H = 900, 500
     bg = Image.new("RGBA", (W, H), (24, 24, 24, 255))
+
+    # Subtle gradient
     g = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(g)
     for y in range(H):
@@ -300,48 +303,65 @@ async def build_versus_card(
         draw.line([(0, y), (W, y)], fill=(255, 255, 255, int(a * 0.08)))
     bg = Image.alpha_composite(bg, g)
 
+    # Avatar boxes
     pad = 32
     face = 360
     left_xy = (pad, pad)
     right_xy = (W - pad - face, pad)
 
-    la = await fetch_avatar(attacker, size=512)
-    ra = await fetch_avatar(target, size=512)
-    la = fit_center(la, face, face)
-    ra = fit_center(ra, face, face)
-    la = rounded_square(la, radius=40)
-    ra = rounded_square(ra, radius=40)
+    # Fetch avatars
+    async def _fetch(member, size=512):
+        try:
+            b = await member.display_avatar.replace(size=size, format="png").read()
+            im = Image.open(BytesIO(b)).convert("RGBA")
+        except Exception:
+            im = Image.new("RGBA", (size, size), (40, 40, 40, 255))
+        return im.resize((size, size), Image.LANCZOS)
+
+    la = await _fetch(attacker)
+    ra = await _fetch(target)
+
+    # Round corners
+    def _rounded(im, radius=40):
+        mask = Image.new("L", im.size, 0)
+        ImageDraw.Draw(mask).rounded_rectangle((0, 0, *im.size), radius=radius, fill=255)
+        im.putalpha(mask)
+        return im
+
+    la = _rounded(la.resize((face, face), Image.LANCZOS))
+    ra = _rounded(ra.resize((face, face), Image.LANCZOS))
+
+    # Grey out loser if requested
+    def _grey(im, dim=0.55):
+        g = ImageOps.grayscale(im).convert("RGBA")
+        return ImageEnhance.Brightness(g).enhance(dim)
 
     if grey_left:
-        la = grey_out(la)
+        la = _grey(la)
     if grey_right:
-        ra = grey_out(ra)
+        ra = _grey(ra)
 
+    # Compose avatars
     card = bg.copy()
     card.alpha_composite(la, dest=left_xy)
     card.alpha_composite(ra, dest=right_xy)
 
-    # Crossed swords overlay (center) – try multiple filenames
-    # Crossed swords overlay (center) – try multiple filenames
-    swords_path = None
-    for name in ("swords.png", "swords.png", "crossed_swords.png"):
+    # Crossed swords overlay (center) — try several filenames
+    import os
+    for name in ("swords.png", "sword.png", "crossed_swords.png"):
         p = os.path.join("assets", name)
         if os.path.exists(p):
-            swords_path = p
+            try:
+                swords = Image.open(p).convert("RGBA")
+                sw = int(W * 0.35)
+                sh = int(swords.height * (sw / swords.width))
+                swords = swords.resize((sw, sh), Image.LANCZOS)
+                sx = (W - sw) // 2
+                sy = int(H * 0.18)
+                card.alpha_composite(swords, dest=(sx, sy))
+            except Exception:
+                pass
             break
-    
-    if swords_path:
-        try:
-            swords = Image.open(swords_path).convert("RGBA")
-            sw = int(W * 0.35)
-            sh = int(swords.height * (sw / swords.width))
-            swords = swords.resize((sw, sh), Image.LANCZOS)
-            sx = (W - sw) // 2
-            sy = int(H * 0.18)
-            card.alpha_composite(swords, dest=(sx, sy))
-        except Exception:
-            pass
-
 
     # Action text strip at bottom
     strip_h = 92
@@ -362,10 +382,12 @@ async def build_versus_card(
     ty = H - pad - strip_h + (strip_h - fnt.getbbox(text)[3]) // 2 - 6
     draw.text((tx, ty), text, font=fnt, fill=(255, 255, 255, 255))
 
+    # Return as bytes for Discord upload
     buf = BytesIO()
     card.convert("RGB").save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return buf
+
 
 # =========================
 # Commands
