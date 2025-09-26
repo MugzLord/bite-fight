@@ -26,11 +26,19 @@ STATS_FILE = os.getenv("BF_STATS_FILE", "bf_stats.json")                 # globa
 TOURNEY_STATE_FILE = os.getenv("BF_TOURNEY_STATE", "bf_tourney.json")    # current tournament state
 TOURNEY_STATS_FILE = os.getenv("BF_TOURNEY_STATS", "bf_tourney_stats.json")  # per-tournament stats
 PRIZES_FILE = os.getenv("BF_PRIZES_FILE", "bf_prizes.json")              # wishlist/credit prize ledger
-ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
-
 
 # Per-channel default ante (used when starting a new tournament)
 CHANNEL_ANTE = defaultdict(lambda: int(os.getenv("BF_ANTE", "100")))
+
+ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+
+def _find_asset(candidates):
+    for name in candidates:
+        p = os.path.join(ASSETS_DIR, name)
+        if os.path.exists(p):
+            return p
+    return None
+
 
 # =========================
 # Small JSON helpers
@@ -355,21 +363,20 @@ async def build_versus_card(
     card.alpha_composite(ra, dest=right_xy)
 
     # Crossed swords overlay (center) — try several filenames
-    import os
-    for name in ("swords.png", "swords.png", "crossed_swords.png"):
-        p = os.path.join("assets", name)
-        if os.path.exists(p):
-            try:
-                swords = Image.open(p).convert("RGBA")
-                sw = int(W * 0.35)
-                sh = int(swords.height * (sw / swords.width))
-                swords = swords.resize((sw, sh), Image.LANCZOS)
-                sx = (W - sw) // 2
-                sy = int(H * 0.18)
-                card.alpha_composite(swords, dest=(sx, sy))
-            except Exception:
-                pass
-            break
+    swords_path = _find_asset(["swords.png", "sword.png", "crossed_swords.png"])
+    if swords_path:
+        try:
+            swords = Image.open(swords_path).convert("RGBA")
+            sw = int(W * 0.35)
+            sh = int(swords.height * (sw / swords.width))
+            swords = swords.resize((sw, sh), Image.LANCZOS)
+            sx = (W - sw) // 2
+            sy = int(H * 0.18)
+            card.alpha_composite(swords, dest=(sx, sy))
+        except Exception as e:
+            print(f"[Bite&Fight] swords overlay failed: {e}")
+    else:
+        print("[Bite&Fight] swords asset not found")
 
     # Action text strip at bottom
     strip_h = 92
