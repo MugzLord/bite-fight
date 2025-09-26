@@ -654,8 +654,6 @@ def brand_embed(embed: discord.Embed, files_list=None):
     return embed, files
 
 
-
-
     files.append(discord.File(path, filename="bf_logo.png"))
     # preserve whatever footer text you already set
     footer_text = getattr(embed.footer, "text", None) or ""
@@ -941,7 +939,9 @@ async def run_game(ctx, game: BiteFightGame):
             
             # small Bite & Fight logo INSIDE the embed (via brand_embed)
             files_to_send = []
-            w_embed = brand_embed(w_embed)
+            # small Bite & Fight logo INSIDE the embed
+            w_embed, files_to_send = brand_embed(w_embed)   # ✅ correct (files_to_send comes back with the logo file)
+
 
             
             # --- POST PROFILE IMAGE ABOVE THE WINNER EMBED
