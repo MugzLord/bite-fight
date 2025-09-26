@@ -348,6 +348,27 @@ async def build_versus_card(
     else:
         print("[Bite&Fight] swords asset not found")
 
+        # --- Logo watermark (top-right) ---
+        logo_path = find_asset(["logo.png", "logo.jpg", "logo.jpeg"])
+        if logo_path:
+            try:
+                logo = Image.open(logo_path).convert("RGBA")
+                # scale to ~18% of card width
+                maxw = int(W * 0.18)
+                scale = min(maxw / logo.width, 1.0)
+                lw, lh = int(logo.width * scale), int(logo.height * scale)
+                logo = logo.resize((lw, lh), Image.LANCZOS)
+    
+                # soften opacity
+                *_, a = logo.split()
+                a = a.point(lambda p: int(p * 0.75))
+                logo.putalpha(a)
+
+            card.alpha_composite(logo, dest=(W - lw - 16, 16))
+        except Exception as e:
+            print(f"[Bite&Fight] logo overlay failed: {e}")
+
+
     # Action text strip at bottom
     strip_h = 92
     strip = Image.new("RGBA", (W - pad * 2, strip_h), (0, 0, 0, 170))
