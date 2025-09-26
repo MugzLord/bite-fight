@@ -803,20 +803,23 @@ async def run_game(ctx, game: BiteFightGame):
                 # If you want a BIG hero image instead, use:
                 # w_embed.set_image(url="attachment://winner.png")
             
-           # add a View Profile button on the winner card
-            view = discord.ui.View(timeout=None)
+          
+            # --- POST PROFILE IMAGE ABOVE THE WINNER EMBED (Pixxie-style, no buttons)
             if winner:
-                view.add_item(discord.ui.Button(
-                    label="View Profile",
-                    style=discord.ButtonStyle.primary,
-                    custom_id=f"bf_profile:{winner.id}",
-                ))
+                try:
+                    buf = await build_profile_card(winner)  # if you added this helper
+                except Exception:
+                    # fallback: just send the avatar
+                    av_bytes = await winner.display_avatar.replace(size=512, format="png").read()
+                    buf = BytesIO(av_bytes)
+                await game.channel.send(file=discord.File(buf, filename="profile.png"))
             
+            # --- THEN SEND THE WINNER EMBED
             if files_to_send:
-                await game.channel.send(embed=w_embed, files=files_to_send, view=view)
+                await game.channel.send(embed=w_embed, files=files_to_send)
             else:
-                await game.channel.send(embed=w_embed, view=view)
-            
+                await game.channel.send(embed=w_embed)
+
             
 
             game.reset()
