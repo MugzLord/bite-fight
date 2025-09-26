@@ -18,6 +18,7 @@ INTENTS.message_content = True
 INTENTS.guilds = True
 INTENTS.members = True
 
+
 bot = commands.Bot(command_prefix=PREFIX, intents=INTENTS)
 # ---- Game State (per channel) ----
 class BiteFightGame:
@@ -35,6 +36,8 @@ class BiteFightGame:
         # ADD
         self.lobby_view = None
         self._ctx = None  # store start context for later
+        self.start_time = None
+        self.kills = defaultdict(int)   # attacker_id -> kills this match
 
     def reset(self):
         self.in_lobby = False
@@ -47,6 +50,32 @@ class BiteFightGame:
         # ADD
         self.lobby_view = None
         self._ctx = None
+        self.start_time = None
+        self.kills.clear()
+
+
+STATS_FILE = os.getenv("BF_STATS_FILE", "bf_stats.json")
+
+def _load_stats():
+    if not os.path.exists(STATS_FILE):
+        return {"global": {"wins": {}, "kills": {}}, "guilds": {}}
+    try:
+        with open(STATS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"global": {"wins": {}, "kills": {}}, "guilds": {}}
+
+def _save_stats(stats):
+    try:
+        with open(STATS_FILE, "w", encoding="utf-8") as f:
+            json.dump(stats, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def _bump(dct, key, by=1):
+    key = str(key)
+    dct[key] = dct.get(key, 0) + by
+
 
 # Channel ID -> Game
 GAMES: dict[int, BiteFightGame] = {}
@@ -355,6 +384,8 @@ async def bf_begin(ctx):
     game.in_lobby = False
     game.running = True
     game.round_num = 0
+    game.kills[attacker.id] += 1
+
 
     intro = line("intro", game.banter) or "The gates close. The crowd roars. Fight."
     embed = discord.Embed(
@@ -523,37 +554,75 @@ async def run_game(ctx, game: BiteFightGame):
         alive_now = alive_players(game)
         if len(alive_now) <= 1:
             winner = alive_now[0] if alive_now else None
-            title = "Bite & Fight — Match Over"
+        
+            # Compute time survived
+            ended_at = datetime.datetime.utcnow()
+            dur_secs = 0
+            if game.start_time:
+                dur_secs = int((ended_at - game.start_time).total_seconds())
+        
+            # Persist stats
+            stats = _load_stats()
+            guild_id = ctx.guild.id if ctx.guild else "dm"
+            if str(guild_id) not in stats["guilds"]:
+                stats["guilds"][str(guild_id)] = {"wins": {}, "kills": {}}
+        
             if winner:
-                desc = format_line(
-                    line("winner", game.banter) or "[winner] stands alone. Victory.",
-                    winner=winner.display_name
-                )
+                _bump(stats["global"]["wins"], winner.id, 1)
+                _bump(stats["guilds"][str(guild_id)]["wins"], winner.id, 1)
+        
+            # add kills from this match to both server and global tallies
+            for uid, k in game.kills.items():
+                if k <= 0: 
+                    continue
+                _bump(stats["global"]["kills"], uid, k)
+                _bump(stats["guilds"][str(guild_id)]["kills"], uid, k)
+        
+            _save_stats(stats)
+        
+            # Prepare numbers for the card
+            total_kills_this_match = sum(game.kills.values())
+            wins_in_server = stats["guilds"][str(guild_id)]["wins"].get(str(winner.id), 0) if winner else 0
+            wins_global = stats["global"]["wins"].get(str(winner.id), 0) if winner else 0
+        
+            # Build the final embed
+            title = "Bite & Fight — Winner"
+            if winner:
+                top_line = f"{winner.display_name} wins in {ctx.guild.name if ctx.guild else 'this arena'}!"
             else:
-                desc = line("no_winner", game.banter) or "Everyone fell. No winner this time."
-
+                top_line = "No winner. Everyone fell."
+        
             embed = discord.Embed(
                 title=title,
-                description=desc,
+                description=f"🏆 {top_line}",
                 color=discord.Color.gold(),
                 timestamp=datetime.datetime.utcnow()
             )
-            if events:
-                embed.add_field(
-                    name=f"Round {game.round_num} Summary",
-                    value="\n".join(events)[:1024],
-                    inline=False
-                )
-
+        
+            if winner:
+                embed.add_field(name="Total kills (match)", value=f"💀 {total_kills_this_match}", inline=True)
+                embed.add_field(name="Time survived", value=f"⏱️ {dur_secs}s", inline=True)
+                embed.add_field(name="\u200b", value="\u200b", inline=True)  # spacer
+        
+                embed.add_field(name="Wins in this server", value=f"🏆 {wins_in_server}", inline=True)
+                embed.add_field(name="Wins globally", value=f"🌍 {wins_global}", inline=True)
+                embed.add_field(name="\u200b", value="Check your stats with `!bf_profile`", inline=False)
+        
+            # Show final HP table too
             board = "\n".join(
                 f"{p.display_name}: {game.hp.get(p.id, 0)} HP"
                 for p in game.players
-            )
+            ) or "No combatants."
             embed.add_field(name="Final HP", value=board[:1024], inline=False)
-
+        
+            # Attach last round summary if you have one
+            if events:
+                embed.add_field(name=f"Round {game.round_num} Summary", value="\n".join(events)[:1024], inline=False)
+        
             await game.channel.send(embed=embed)
             game.reset()
             return
+
 
         # Post one embed for the round
         if not events:
@@ -606,6 +675,28 @@ async def run_game(ctx, game: BiteFightGame):
         
         # Short pause between rounds
         await asyncio.sleep(2.2)
+        
+@bot.command(name="bf_profile")
+async def bf_profile(ctx, member: discord.Member = None):
+    member = member or ctx.author
+    stats = _load_stats()
+    gid = str(ctx.guild.id) if ctx.guild else "dm"
+    g = stats.get("guilds", {}).get(gid, {"wins": {}, "kills": {}})
+    wins_server = g["wins"].get(str(member.id), 0)
+    kills_server = g["kills"].get(str(member.id), 0)
+    wins_global = stats.get("global", {}).get("wins", {}).get(str(member.id), 0)
+    kills_global = stats.get("global", {}).get("kills", {}).get(str(member.id), 0)
+
+    embed = discord.Embed(
+        title=f"Bite & Fight — {member.display_name}",
+        color=discord.Color.dark_gold()
+    )
+    embed.add_field(name="Wins (this server)", value=f"{wins_server}", inline=True)
+    embed.add_field(name="Wins (global)", value=f"{wins_global}", inline=True)
+    embed.add_field(name="\u200b", value="\u200b", inline=True)
+    embed.add_field(name="Kills (this server)", value=f"{kills_server}", inline=True)
+    embed.add_field(name="Kills (global)", value=f"{kills_global}", inline=True)
+    await ctx.send(embed=embed)
 
 @bot.event
 async def on_ready():
