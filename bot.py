@@ -861,9 +861,7 @@ async def run_game(ctx, game: BiteFightGame):
                 # reflect progress on the active tournament
                 state["games_played"] = int(state.get("games_played", 0)) + 1
                 _tourney_state_save(state)
-
-
-            # Winner embed (no separate “Round X Summary” card)
+-
             # ---------- Winner card (Pixxie-style) ----------
             total_kills_this_match = sum(game.kills.values())
             wins_in_server = stats["guilds"][str(guild_id)]["wins"].get(str(winner.id), 0) if winner else 0
@@ -871,19 +869,13 @@ async def run_game(ctx, game: BiteFightGame):
             
             top_line = f"**{winner.display_name}** wins in **{ctx.guild.name if ctx.guild else 'this arena'}**!" if winner else "No winner. Everyone fell."
             lines = [top_line]
-            
-            # bullet-style facts (no payout)
             lines.append(f"💀 **Total kills:** {total_kills_this_match}")
             lines.append(f"⏱️ **Time survived:** {dur_secs}s")
             if winner:
                 lines.append(f"🏆 **Total wins in server:** {wins_in_server}")
                 lines.append(f"🌍 **Total wins globally:** {wins_global}")
-            
-            # show pot if it was a tournament
             if getattr(game, "is_tournament", False):
                 lines.append(f"💰 **Pot:** {game.pot}")
-                
-            
             lines.append("🔎 Check your stats with `!bf_profile`")
             
             w_embed = discord.Embed(
@@ -892,37 +884,30 @@ async def run_game(ctx, game: BiteFightGame):
                 color=discord.Color.gold(),
                 timestamp=datetime.datetime.utcnow()
             )
-            # show the winner's profile picture on the card
+            
+            # winner avatar on the embed (use w_embed, not embed)
             if winner:
                 av = winner.display_avatar.replace(size=256, static_format="png").url
-                w_embed.set_thumbnail(url=av)                       # use w_embed here
+                w_embed.set_thumbnail(url=av)
                 w_embed.set_author(name=winner.display_name, icon_url=av)
             
-
-            # small logo/mark on the card (if you have logo.png in assets/)
+            # optional logo as BIG image (keeps avatar as thumbnail)
             files_to_send = []
-            try:
-                logo_path = find_asset(["winner.png", "victory.png", "logo.png"])  # pick the first you have
-            except NameError:
-                logo_path = None  # if your helper is named _find_asset in your file, you can switch to that here
-            
+            logo_path = find_asset(["winner.png", "victory.png", "logo.png"])
             if logo_path:
                 files_to_send.append(discord.File(logo_path, filename="winner.png"))
-                w_embed.set_thumbnail(url="attachment://winner.png")
-                # If you want a BIG hero image instead, use:
-                # w_embed.set_image(url="attachment://winner.png")
+                w_embed.set_image(url="attachment://winner.png")
             
-          
-            # --- POST PROFILE IMAGE ABOVE THE WINNER EMBED (Pixxie-style)
+            # --- POST PROFILE IMAGE ABOVE THE WINNER EMBED (uses versus_bg via build_profile_card)
             if winner:
                 try:
-                    buf = await build_profile_card(winner)  # uses versus_bg as background (see step 2)
+                    buf = await build_profile_card(winner)
                 except Exception:
                     av_bytes = await winner.display_avatar.replace(size=512, format="png").read()
                     buf = BytesIO(av_bytes)
                 await game.channel.send(file=discord.File(buf, filename="profile.png"))
             
-            # --- ADD "My Stats" BUTTON (acts like !bf_profile)
+            # --- attach a My Stats button (acts like !bf_profile)
             view = discord.ui.View(timeout=None)
             if winner:
                 view.add_item(discord.ui.Button(
@@ -931,15 +916,15 @@ async def run_game(ctx, game: BiteFightGame):
                     custom_id=f"bf_stats:{winner.id}",
                 ))
             
-            # --- SEND THE WINNER EMBED (keep your two-branch structure)
+            # --- SEND THE WINNER EMBED
             if files_to_send:
                 await game.channel.send(embed=w_embed, files=files_to_send, view=view)
             else:
                 await game.channel.send(embed=w_embed, view=view)
-
-
+            
             game.reset()
             return
+
 
         # small pause between rounds
         await asyncio.sleep(2.0)
