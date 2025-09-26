@@ -497,7 +497,7 @@ async def bf_begin(ctx):
         color=discord.Color.dark_gold(),
         timestamp=datetime.datetime.utcnow()
     )
-    embed.add_field(name=f"🍔 {len(game.players)} challengers on the menu",
+    embed.add_field(name=f"🍽️ {len(game.players)} challengers on the menu",
                     value=f"```{names_only}```",
                     inline=False)
 
@@ -553,6 +553,7 @@ async def run_game(ctx, game: BiteFightGame):
     while game.running:
         game.round_num += 1
         events = []
+        file = None  # <-- make sure it's always defined for this round
 
         # Apply bleed first (no kill credit for bleed)
         for p in list(alive_players(game)):
