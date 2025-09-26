@@ -162,6 +162,7 @@ GAMES: dict[int, BiteFightGame] = {}
 
 # ---- Lobby UI ----
 class LobbyView(discord.ui.View):
+    """Only a Join button; no Tributes / Start buttons."""
     def __init__(self, game: "BiteFightGame", host: discord.Member, timeout: float = 30.0):
         super().__init__(timeout=timeout)
         self.game = game
@@ -169,6 +170,7 @@ class LobbyView(discord.ui.View):
         self.message: discord.Message | None = None
 
     async def on_timeout(self):
+        # when timer ends the game auto-begins
         if self.game.in_lobby:
             try:
                 for c in self.children:
@@ -178,31 +180,46 @@ class LobbyView(discord.ui.View):
                     await self.message.edit(view=self)
             except Exception:
                 pass
-            ctx = self.game._ctx
-            await bf_begin(ctx)
+            await bf_begin(self.game._ctx)
 
-    async def update_counter(self):
-        if not self.message:
+    async def _set_footer(self):
+        """Show host + countdown + joined count in the footer (no Status field)."""
+        if not self.message: 
             return
         embed = self.message.embeds[0]
-        count = len(self.game.players)
-        status_line = f"⚔️ {count} tribute{'s' if count != 1 else ''} have volunteered"
-
-        def set_field(name, value):
-            for i, f in enumerate(embed.fields):
-                if f.name == name:
-                    embed.set_field_at(i, name=name, value=value, inline=False)
-                    return
-            embed.add_field(name=name, value=value, inline=False)
-
-        set_field("Status", status_line)
-        if self.game.is_tournament:
-            set_field("Pot", f"💰 {self.game.pot} • Entry {self.game.entry_fee}")
-
+        joined = len(self.game.players)
+        # keep the same title/description/color/etc., just refresh footer text
+        embed.set_footer(text=f"Host: {self.game._ctx.author.display_name} • Lobby closes in 30s • {joined} joined")
         try:
             await self.message.edit(embed=embed, view=self)
         except Exception:
             pass
+
+    async def update_counter(self):
+        # no Status field anymore, only footer is updated
+        await self._set_footer()
+
+    @discord.ui.button(label="Join", emoji="🍔", style=discord.ButtonStyle.success)
+    async def join_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        user = interaction.user
+        if not self.game.in_lobby:
+            return await interaction.response.send_message("Lobby closed.", ephemeral=True)
+        if user.bot:
+            return await interaction.response.send_message("Bots cannot join.", ephemeral=True)
+        if user in self.game.players:
+            return await interaction.response.send_message("You are already in.", ephemeral=True)
+
+        # tournament: auto add to pot
+        if self.game.is_tournament:
+            self.game.pot += self.game.entry_fee
+            self.game.buyins[user.id] = self.game.buyins.get(user.id, 0) + self.game.entry_fee
+
+        self.game.players.append(user)
+        self.game.hp[user.id] = self.game.max_hp
+
+        await interaction.response.send_message(f"{user.display_name} joined the arena.", ephemeral=True)
+        await self.update_counter()
+
 
     @discord.ui.button(label="Join", emoji="🍔", style=discord.ButtonStyle.success)
     async def join_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -406,10 +423,17 @@ async def bf_start(ctx):
 
     title = f"{ctx.guild.name or 'Bite & Fight'} — Arena"
     subtitle = "Part 1 - Setting The Table"
-    desc = "🍔 to join the fight!\n
-    embed = discord.Embed(title=title, description=f"**{subtitle}**\n\n{desc}", color=discord.Color.dark_gold())
-
-    # attach a local logo as thumbnail if available
+    
+    # No more bullet instructions here
+    desc = ""
+    
+    embed = discord.Embed(
+        title=title,
+        description=f"**{subtitle}**\n\n{desc}",
+        color=discord.Color.dark_gold()
+    )
+    
+    # attach a local logo as thumbnail if available (unchanged logic)
     files = []
     logo_path = find_asset(["logo.png", "logo.jpg", "logo.jpeg"])
     if logo_path:
@@ -418,19 +442,24 @@ async def bf_start(ctx):
         embed.set_thumbnail(url=f"attachment://{attach_name}")
         files.append(discord.File(logo_path, filename=attach_name))
     else:
-        embed.set_thumbnail(url="https://i.imgur.com/4Zb9o2p.png")  # fallback
-
-    embed.add_field(name="Status", value="⚔️ 0 challengers are on the menu", inline=False)
+        # (optional) fallback thumbnail URL or just skip entirely
+        pass
+    
+    # NO Status field anymore
     if game.is_tournament:
         embed.add_field(name="Pot", value=f"💰 {game.pot} • Entry {game.entry_fee}", inline=False)
+    
+    # Footer shows host + timer (player count will be appended by the view)
     embed.set_footer(text=f"Host: {ctx.author.display_name} • Lobby closes in 30s")
-
+    
     view = LobbyView(game, host=ctx.author, timeout=30.0)
     game.lobby_view = view
-
-    # SEND WITHOUT ANY FILE ATTACHMENT (no logo in lobby)
-    msg = await ctx.send(embed=embed, view=view)
+    if files:
+        msg = await ctx.send(embed=embed, view=view, files=files)
+    else:
+        msg = await ctx.send(embed=embed, view=view)
     view.message = msg
+
 
     async def lobby_timer():
         await asyncio.sleep(15)
