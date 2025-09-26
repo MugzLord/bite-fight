@@ -30,13 +30,20 @@ PRIZES_FILE = os.getenv("BF_PRIZES_FILE", "bf_prizes.json")              # wishl
 # Per-channel default ante (used when starting a new tournament)
 CHANNEL_ANTE = defaultdict(lambda: int(os.getenv("BF_ANTE", "100")))
 
-ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+ROOT_DIR = os.path.dirname(__file__)
+ASSET_DIRS = [
+    os.path.join(ROOT_DIR, "assets"),   # normal folder
+    os.path.join(ROOT_DIR, "assets)"),  # your accidental folder name
+    ROOT_DIR,                            # repo root (where logo.png / swords.png are now)
+]
 
-def _find_asset(candidates):
-    for name in candidates:
-        p = os.path.join(ASSETS_DIR, name)
-        if os.path.exists(p):
-            return p
+def find_asset(candidates: list[str]) -> str | None:
+    """Return the first existing file path from our asset dirs."""
+    for d in ASSET_DIRS:
+        for name in candidates:
+            p = os.path.join(d, name)
+            if os.path.exists(p):
+                return p
     return None
 
 
@@ -59,7 +66,7 @@ def _json_save(path, data):
     except Exception:
         pass
         
-def _find_asset(candidates):
+def find_asset(candidates):
     for name in candidates:
         p = os.path.join(ASSETS_DIR, name)
         if os.path.exists(p):
@@ -104,7 +111,7 @@ def _prizes_save(d):
     _json_save(PRIZES_FILE, d)
 
 # Find a local asset by possible names
-def _find_asset(names):
+def find_asset(names):
     for n in names:
         p = os.path.join("assets", n)
         if os.path.exists(p):
@@ -363,7 +370,7 @@ async def build_versus_card(
     card.alpha_composite(ra, dest=right_xy)
 
     # Crossed swords overlay (center) — try several filenames
-    swords_path = _find_asset(["swords.png", "sword.png", "crossed_swords.png"])
+    swords_path = find_asset(["swords.png", "sword.png", "crossed_swords.png"])
     if swords_path:
         try:
             swords = Image.open(swords_path).convert("RGBA")
@@ -377,6 +384,7 @@ async def build_versus_card(
             print(f"[Bite&Fight] swords overlay failed: {e}")
     else:
         print("[Bite&Fight] swords asset not found")
+
 
     # Action text strip at bottom
     strip_h = 92
@@ -429,11 +437,17 @@ async def bf_start(ctx):
     embed = discord.Embed(title=title, description=f"**{subtitle}**\n\n{desc}", color=discord.Color.dark_gold())
 
     # attach a local logo as thumbnail if available
-    thumb_file = None
-    logo_path = _find_asset(["logo.png", "logo.jpg", "logo.jpeg"])
+    files = []
+    logo_path = find_asset(["logo.png", "logo.jpg", "logo.jpeg"])
     if logo_path:
-        embed.set_thumbnail(url="attachment://logo.png")
-        thumb_file = discord.File(logo_path, filename="logo.png")
+        ext = os.path.splitext(logo_path)[1].lower()   # .png/.jpg
+        attach_name = f"logo{ext}"
+        embed.set_thumbnail(url=f"attachment://{attach_name}")
+        files.append(discord.File(logo_path, filename=attach_name))
+    else:
+        # optional fallback
+        embed.set_thumbnail(url="https://i.imgur.com/4Zb9o2p.png")
+
 
     embed.add_field(name="Status", value="⚔️ 0 tributes have volunteered", inline=False)
     if game.is_tournament:
@@ -443,11 +457,10 @@ async def bf_start(ctx):
     view = LobbyView(game, host=ctx.author, timeout=30.0)
     game.lobby_view = view
 
-    if thumb_file:
-        msg = await ctx.send(embed=embed, view=view, file=thumb_file)
-    else:
-        msg = await ctx.send(embed=embed, view=view)
+    msg = await ctx.send(embed=embed, view=view, files=files) if files else \
+          await ctx.send(embed=embed, view=view)
     view.message = msg
+
 
     async def lobby_timer():
         await asyncio.sleep(15)
@@ -907,11 +920,28 @@ async def bf_prizes(ctx):
 @bot.command(name="bf_dbg_assets")
 @commands.has_permissions(administrator=True)
 async def bf_dbg_assets(ctx):
-    try:
-        files = ", ".join(sorted(os.listdir("assets"))) or "(empty)"
-        await ctx.send(f"assets/: {files}")
-    except Exception as e:
-        await ctx.send(f"assets/ not readable: {e}")
+    lines = []
+    for d in ASSET_DIRS:
+        try:
+            if os.path.isdir(d):
+                entries = ", ".join(sorted(os.listdir(d))) or "(empty)"
+                lines.append(f"{d} -> {entries}")
+            else:
+                lines.append(f"{d} -> (not a directory)")
+        except Exception as e:
+            lines.append(f"{d} -> ERROR: {e}")
+    await ctx.send("Asset scan:\n" + "\n".join(lines))
+
+        
+@bot.command(name="bf_cardtest")
+@commands.has_permissions(administrator=True)
+async def bf_cardtest(ctx, left: discord.Member=None, right: discord.Member=None, *, text: str="Test swing!"):
+    left = left or ctx.author
+    right = right or ctx.author
+    # draw with swords and grey the right to make it obvious
+    img = await build_versus_card(left, right, text, grey_right=True)
+    await ctx.send(file=discord.File(img, filename="test_card.png"))
+
 
 @bot.command(name="bf_prize_done")
 @commands.has_permissions(administrator=True)
