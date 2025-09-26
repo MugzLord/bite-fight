@@ -229,22 +229,7 @@ class LobbyView(discord.ui.View):
         names = ", ".join(p.display_name for p in self.game.players) or "None yet"
         await interaction.response.send_message(f"Current tributes: {names}", ephemeral=True)
 
-    @discord.ui.button(label= emoji="🍽️", style=discord.ButtonStyle.primary)
-    async def start_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.host.id:
-            return await interaction.response.send_message("Only the host can start.", ephemeral=True)
-        if not self.game.in_lobby:
-            return await interaction.response.send_message("Already started.", ephemeral=True)
-        for c in self.children:
-            if isinstance(c, discord.ui.Button):
-                c.disabled = True
-        try:
-            await interaction.response.edit_message(view=self)
-        except Exception:
-            pass
-        ctx = self.game._ctx
-        await bf_begin(ctx)
-
+    
 # ---- Banter helpers ----
 def line(pool_name, banter):
     pool = banter.get(pool_name, [])
@@ -460,37 +445,35 @@ async def bf_start(ctx):
 
 # NOTE: no !bf_join – buttons handle join; bf_begin is internal
 async def bf_begin(ctx):
-    """Begin the match (called by the button/timeout)."""
-    chan_id = ctx.channel.id
-    game = GAMES.get(chan_id)
-    if not game or not game.in_lobby:
-        return await ctx.reply("No open lobby to begin.")
-    if len(game.players) < 2:
-        await ctx.send("Not enough players joined. Cancelling.")
-        game.reset()
-        return
-
-    game.in_lobby = False
-    game.running = True
-    game.round_num = 0
-    game.start_time = datetime.datetime.utcnow()
-
-    intro = line("intro", game.banter) or "The gates close. The crowd roars. Fight."
+    # build the "Part 2 - The Battle Begins..." card (Pixxie-style)
+    intro = line("intro", game.banter) or "A hush falls. Then the roar. Time to settle scores."
+    
     embed = discord.Embed(
-        title="Bite & Fight — Match Begins",
-        description=intro,
-        color=discord.Color.dark_red(),
+        title="May the odds be ever in your flavor!",
+        description="**Part 2 - The Battle Begins...**\n" + intro,
+        color=discord.Color.dark_gold(),
         timestamp=datetime.datetime.utcnow()
     )
-    roster = "\n".join(f"• {p.display_name} — {game.max_hp} HP" for p in game.players)
-    embed.add_field(name="Combatants", value=roster, inline=False)
+    
+    # tributes block (names only, no HP)
+    names_only = "\n".join(p.display_name for p in game.players) or "No tributes"
+    embed.add_field(
+        name=f"🍔 {len(game.players)} tributes",
+        value=f"```{names_only}```",
+        inline=False
+    )
+    
+    # show pot/prize mode if this is a tournament
     if game.is_tournament:
         s = _tourney_state_load()
-        embed.add_field(name="Pot", value=f"💰 {game.pot} • Entry {game.entry_fee}", inline=True)
+        embed.add_field(name="Pot", value=f"💰 {game.pot} (Entry {game.entry_fee})", inline=True)
         embed.add_field(name="Prize mode", value=s.get("prize_mode", "credits").title(), inline=True)
+    
+    # a small footer keeps the host visible (like Pixxie calls out the starter)
+    embed.set_footer(text=f"Host: {ctx.author.display_name}")
+    
     await ctx.send(embed=embed)
 
-    await run_game(ctx, game)
 
 @bot.command(name="bf_stop")
 async def bf_stop(ctx):
