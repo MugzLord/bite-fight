@@ -727,29 +727,51 @@ async def run_game(ctx, game: BiteFightGame):
             _save_stats(stats)
 
             # Winner embed (no separate “Round X Summary” card)
+            # ---------- Winner card (Pixxie-style) ----------
             total_kills_this_match = sum(game.kills.values())
             wins_in_server = stats["guilds"][str(guild_id)]["wins"].get(str(winner.id), 0) if winner else 0
             wins_global = stats["global"]["wins"].get(str(winner.id), 0) if winner else 0
-
-            title = "Bite & Fight — Winner"
-            top_line = f"{winner.display_name} wins in {ctx.guild.name if ctx.guild else 'this arena'}!" if winner else "No winner. Everyone fell."
+            
+            top_line = f"**{winner.display_name}** wins in **{ctx.guild.name if ctx.guild else 'this arena'}**!" if winner else "No winner. Everyone fell."
+            lines = [top_line]
+            
+            # bullet-style facts (no payout)
+            lines.append(f"💀 **Total kills:** {total_kills_this_match}")
+            lines.append(f"⏱️ **Time survived:** {dur_secs}s")
+            if winner:
+                lines.append(f"🏆 **Total wins in server:** {wins_in_server}")
+                lines.append(f"🌍 **Total wins globally:** {wins_global}")
+            
+            # show pot if it was a tournament
+            if getattr(game, "is_tournament", False):
+                lines.append(f"💰 **Pot:** {game.pot}")
+                
+            
+            lines.append("🔎 Check your stats with `!bf_profile`")
+            
             w_embed = discord.Embed(
-                title=title,
-                description=f"🏆 {top_line}",
+                title="🏆 Winner!",
+                description="\n".join(lines),
                 color=discord.Color.gold(),
                 timestamp=datetime.datetime.utcnow()
             )
-            if winner:
-                w_embed.add_field(name="Total kills (match)", value=f"💀 {total_kills_this_match}", inline=True)
-                w_embed.add_field(name="Time survived", value=f"⏱️ {dur_secs}s", inline=True)
-                w_embed.add_field(name="\u200b", value="\u200b", inline=True)
-                w_embed.add_field(name="Wins in this server", value=f"🏆 {wins_in_server}", inline=True)
-                w_embed.add_field(name="Wins globally", value=f"🌍 {wins_global}", inline=True)
+            
+            # small logo/mark on the card (if you have logo.png in assets/)
+            files_to_send = []
+            try:
+                logo_path = find_asset(["winner.png", "victory.png", "logo.png"])  # pick the first you have
+            except NameError:
+                logo_path = None  # if your helper is named _find_asset in your file, you can switch to that here
+            
+            if logo_path:
+                files_to_send.append(discord.File(logo_path, filename="winner.png"))
+                w_embed.set_thumbnail(url="attachment://winner.png")
+                # If you want a BIG hero image instead, use:
+                # w_embed.set_image(url="attachment://winner.png")
+            
+            await game.channel.send(embed=w_embed, files=files_to_send or None)
+            # ---------- end winner card ----------
 
-            board = "\n".join(f"{p.display_name}: {game.hp.get(p.id, 0)} HP" for p in game.players) or "No combatants."
-            w_embed.add_field(name="Final HP", value=board[:1024], inline=False)
-
-            await game.channel.send(embed=w_embed)
 
             game.reset()
             return
