@@ -521,8 +521,9 @@ async def bf_start(ctx):
     view = LobbyView(game, host=ctx.author, timeout=30.0)
     game.lobby_view = view
     
-    embed, files = brand_embed(embed)
-    msg = await ctx.send(embed=embed, view=view, files=files)
+    embed = brand_embed(embed)
+    msg = await ctx.send(embed=embed, view=view)
+
 
     view.message = msg
 
@@ -588,8 +589,8 @@ async def bf_begin(ctx):
         embed.add_field(name="Prize mode", value=s.get("prize_mode", "credits").title(), inline=True)
 
     embed.set_footer(text=f"Host: {ctx.author.display_name}")
-    embed, files = brand_embed(embed)
-    await ctx.send(embed=embed, files=files)
+    embed = brand_embed(embed)
+    await ctx.send(embed=embed)
 
 
     # run rounds; if anything blows up, show it so it doesn't look "stuck"
@@ -643,14 +644,16 @@ def hp_bar(cur: int, max_hp: int, width: int = 18) -> str:
     filled = int(round(width * (cur / max_hp))) if max_hp else 0
     return "▰" * filled + "▱" * (width - filled)
 
-def brand_embed(embed: discord.Embed, files_list=None):
-    """Attach Bite & Fight logo as a SMALL THUMBNAIL (top-right)."""
-    path = find_asset(["logo.png", "logo.jpg", "logo.jpeg"])
-    files = list(files_list or [])
-    if path:
-        files.append(discord.File(path, filename="bf_logo.png"))
-        embed.set_thumbnail(url="attachment://bf_logo.png")
-    return embed, files
+def brand_embed(embed: discord.Embed):
+    """
+    Put a SMALL Bite & Fight logo inside the embed (top-right) using a URL.
+    No attachments, so it can never post as a separate big image.
+    """
+    logo_url = os.getenv("BF_LOGO_URL")  # set this to a direct PNG URL
+    if logo_url:
+        embed.set_thumbnail(url=logo_url)
+    return embed
+
 
 
     files.append(discord.File(path, filename="bf_logo.png"))
@@ -848,11 +851,12 @@ async def run_game(ctx, game: BiteFightGame):
             embed.set_image(url=f"attachment://round_{game.round_num}.png")
             files.append(file)
         
-        embed, files = brand_embed(embed, files_list=files)
+        embed = brand_embed(embed)
         if files:
-            await game.channel.send(embed=embed, files=files)
+            await game.channel.send(embed=embed, files=files)  # only the round image in files
         else:
             await game.channel.send(embed=embed)
+
 
 
         # -------- end condition & winner embed --------
@@ -937,7 +941,8 @@ async def run_game(ctx, game: BiteFightGame):
             
             # small Bite & Fight logo INSIDE the embed (via brand_embed)
             files_to_send = []
-            w_embed, files_to_send = brand_embed(w_embed, files_to_send)
+            w_embed = brand_embed(w_embed)
+
             
             # --- POST PROFILE IMAGE ABOVE THE WINNER EMBED
             if winner:
