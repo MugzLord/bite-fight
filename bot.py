@@ -26,6 +26,8 @@ STATS_FILE = os.getenv("BF_STATS_FILE", "bf_stats.json")                 # globa
 TOURNEY_STATE_FILE = os.getenv("BF_TOURNEY_STATE", "bf_tourney.json")    # current tournament state
 TOURNEY_STATS_FILE = os.getenv("BF_TOURNEY_STATS", "bf_tourney_stats.json")  # per-tournament stats
 PRIZES_FILE = os.getenv("BF_PRIZES_FILE", "bf_prizes.json")              # wishlist/credit prize ledger
+ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+
 
 # Per-channel default ante (used when starting a new tournament)
 CHANNEL_ANTE = defaultdict(lambda: int(os.getenv("BF_ANTE", "100")))
@@ -48,7 +50,13 @@ def _json_save(path, data):
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
-
+        
+def _find_asset(candidates):
+    for name in candidates:
+        p = os.path.join(ASSETS_DIR, name)
+        if os.path.exists(p):
+            return p
+    return None
 # Global/server stats (wins, kills)
 def _load_stats():
     return _json_load(STATS_FILE, {"global": {"wins": {}, "kills": {}}, "guilds": {}})
@@ -348,7 +356,7 @@ async def build_versus_card(
 
     # Crossed swords overlay (center) — try several filenames
     import os
-    for name in ("swords.png", "sword.png", "crossed_swords.png"):
+    for name in ("swords.png", "swords.png", "crossed_swords.png"):
         p = os.path.join("assets", name)
         if os.path.exists(p):
             try:
