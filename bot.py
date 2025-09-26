@@ -364,9 +364,9 @@ async def build_versus_card(
                 a = a.point(lambda p: int(p * 0.75))
                 logo.putalpha(a)
 
-            card.alpha_composite(logo, dest=(W - lw - 16, 16))
-        except Exception as e:
-            print(f"[Bite&Fight] logo overlay failed: {e}")
+                card.alpha_composite(logo, dest=(W - lw - 16, 16))
+            except Exception as e:
+                print(f"[Bite&Fight] logo overlay failed: {e}")
 
 
     # Action text strip at bottom
