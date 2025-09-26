@@ -810,6 +810,16 @@ async def run_game(ctx, game: BiteFightGame):
             except Exception:
                 file = None  # never crash a round just for the art
 
+                # -------- build the round embed --------
+                embed = discord.Embed(
+                    title=f"Bite & Fight — Round {game.round_num}",
+                    description=line("round_intro", game.banter) or "",
+                    color=discord.Color.dark_red(),
+                    timestamp=datetime.datetime.utcnow()
+                )
+                embed.add_field(name="Events", value="\n".join(events)[:1024], inline=False)
+
+
                 # -------- post the round (single embed per round) --------
                 embed = discord.Embed(
                     title=f"Bite & Fight — Round {game.round_num}",
@@ -920,16 +930,16 @@ async def run_game(ctx, game: BiteFightGame):
                 timestamp=datetime.datetime.utcnow()
             )
             
-            # winner avatar on the embed (use w_embed, not embed)
+            # winner avatar as AUTHOR ICON (leave thumbnail for logo)
             if winner:
                 av = winner.display_avatar.replace(size=256, static_format="png").url
-                #w_embed.set_thumbnail(url=av)
                 w_embed.set_author(name=winner.display_name, icon_url=av)
             
-            
+            # small Bite & Fight logo INSIDE the embed (via brand_embed)
+            files_to_send = []
             w_embed, files_to_send = brand_embed(w_embed, files_to_send)
             
-            # --- POST PROFILE IMAGE ABOVE THE WINNER EMBED (uses versus_bg via build_profile_card)
+            # --- POST PROFILE IMAGE ABOVE THE WINNER EMBED
             if winner:
                 try:
                     buf = await build_profile_card(winner)
@@ -938,7 +948,7 @@ async def run_game(ctx, game: BiteFightGame):
                     buf = BytesIO(av_bytes)
                 await game.channel.send(file=discord.File(buf, filename="profile.png"))
             
-            # --- attach a My Stats button (acts like !bf_profile)
+            # --- "My Stats" button
             view = discord.ui.View(timeout=None)
             if winner:
                 view.add_item(discord.ui.Button(
@@ -955,6 +965,7 @@ async def run_game(ctx, game: BiteFightGame):
             
             game.reset()
             return
+
 
 
         # small pause between rounds
