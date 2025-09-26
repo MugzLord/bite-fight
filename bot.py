@@ -644,15 +644,15 @@ def hp_bar(cur: int, max_hp: int, width: int = 18) -> str:
     filled = int(round(width * (cur / max_hp))) if max_hp else 0
     return "▰" * filled + "▱" * (width - filled)
 
-def brand_embed(embed: discord.Embed):
-    """
-    Put a SMALL Bite & Fight logo inside the embed (top-right) using a URL.
-    No attachments, so it can never post as a separate big image.
-    """
-    logo_url = os.getenv("BF_LOGO_URL")  # set this to a direct PNG URL
-    if logo_url:
-        embed.set_thumbnail(url=logo_url)
-    return embed
+def brand_embed(embed: discord.Embed, files_list=None):
+    """Put the Bite & Fight logo as a SMALL THUMBNAIL (top-right) inside the embed."""
+    path = find_asset(["logo.png", "logo.jpg", "logo.jpeg"])
+    files = list(files_list or [])
+    if path:
+        files.append(discord.File(path, filename="bf_logo.png"))
+        embed.set_thumbnail(url="attachment://bf_logo.png")  # <-- corner logo
+    return embed, files
+
 
 
 
