@@ -638,39 +638,40 @@ async def run_game(ctx, game: BiteFightGame):
                         break
                 if found:
                     break
-        
+            #  
             file = None
-                if key_play and key_attacker and key_target:
-                    try:
-                        lower = key_play.lower()
-                
-                        # 1) Decide winner/loser for THIS play
-                        # miss  -> attacker loses the exchange
-                        # hit/crit/bleed -> target loses the exchange
-                        if "miss" in lower:
-                            loser  = key_attacker
-                            winner = key_target
-                        else:
-                            loser  = key_target
-                            winner = key_attacker
-                
-                        # 2) Randomize sides: winner on left ~50% of the time
-                        winner_left = random.choice([True, False])
-                        if winner_left:
-                            left_member, right_member = winner, loser
-                            grey_left, grey_right    = False, True   # loser on right
-                        else:
-                            left_member, right_member = loser, winner
-                            grey_left, grey_right     = True, False  # loser on left
-                
-                        # 3) Build the card (swords + logo are drawn inside this)
-                        img_bytes = await build_versus_card(
-                            left_member, right_member, key_play,
-                            grey_left=grey_left, grey_right=grey_right
-                        )
-                        file = discord.File(img_bytes, filename=f"round_{game.round_num}.png")
-                    except Exception:
-                        file = None
+            if key_play and key_attacker and key_target:
+                try:
+                    lower = key_play.lower()
+            
+                    # 1) Decide winner/loser for THIS play
+                    # miss  -> attacker loses the exchange
+                    # hit/crit/bleed -> target loses the exchange
+                    if "miss" in lower:
+                        loser  = key_attacker
+                        winner = key_target
+                    else:
+                        loser  = key_target
+                        winner = key_attacker
+            
+                    # 2) Randomize sides: winner on left ~50% of the time
+                    winner_left = random.choice([True, False])
+                    if winner_left:
+                        left_member, right_member = winner, loser
+                        grey_left, grey_right    = False, True   # loser on right
+                    else:
+                        left_member, right_member = loser, winner
+                        grey_left, grey_right     = True, False  # loser on left
+            
+                    # 3) Build the card (swords + logo are drawn inside this)
+                    img_bytes = await build_versus_card(
+                        left_member, right_member, key_play,
+                        grey_left=grey_left, grey_right=grey_right
+                    )
+                    file = discord.File(img_bytes, filename=f"round_{game.round_num}.png")
+                except Exception:
+                    file = None
+
 
 
         
