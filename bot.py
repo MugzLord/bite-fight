@@ -321,14 +321,14 @@ async def build_versus_card(
     pad = 32
     face = 360
 
-    # --- background + subtle gradient
-    bg = Image.new("RGBA", (W, H), (24, 24, 24, 255))
-    g = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(g)
-    for y in range(H):
-        a = int(180 * (y / H))
-        draw.line([(0, y), (W, y)], fill=(255, 255, 255, int(a * 0.08)))
-    card = Image.alpha_composite(bg, g)
+    # --- background image base (versus_bg.png)
+    from pathlib import Path
+    try:
+        bg_path = Path(__file__).with_name("versus_bg.png")  # or Path(__file__).with_name("assets") / "versus_bg.png"
+        background = Image.open(bg_path).convert("RGBA").resize((W, H), Image.LANCZOS)
+    except Exception:
+        background = Image.new("RGBA", (W, H), (24, 24, 24, 255))
+    card = background.copy()  # start from the bg so it shows everywhere
 
     # --- avatars
     async def _fetch(member, size=512):
@@ -359,46 +359,7 @@ async def build_versus_card(
     card.alpha_composite(la, dest=(pad, pad))
     card.alpha_composite(ra, dest=(W - pad - face, pad))
 
-    # >>> ADDED: build a Bite & Fight "versus" background
-    bg_path = "assets/versus_bg.png"  # put your file here if you have one
-    
-    try:
-        background = Image.open(bg_path).convert("RGBA").resize((W, H), Image.LANCZOS)
-    except Exception:
-        # Fallback: dark arena with subtle gradient + vignette (no extra imports needed)
-        background = Image.new("RGBA", (W, H), (18, 18, 24, 255))
-    
-        # vertical luminance gradient
-        g = Image.new("L", (1, H))
-        for y in range(H):
-            g.putpixel((0, y), int(60 + 110 * (y / (H - 1))))
-        g = g.resize((W, H))
-        gradient = Image.merge("RGBA", (g, g, g, Image.new("L", (W, H), 255)))
-        background = Image.blend(background, gradient, 0.35)
-    
-        # soft vignette edges (drawn with translucent rectangles to avoid ImageFilter)
-        edge = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        d = ImageDraw.Draw(edge)
-        v = int(min(W, H) * 0.08)
-        d.rectangle((0, 0, W, v), fill=(0, 0, 0, 120))            # top
-        d.rectangle((0, H - v, W, H), fill=(0, 0, 0, 140))        # bottom
-        d.rectangle((0, 0, v, H), fill=(0, 0, 0, 120))            # left
-        d.rectangle((W - v, 0, W, H), fill=(0, 0, 0, 140))        # right
-        background = Image.alpha_composite(background, edge)
-    
-        # subtle center glow behind the VS area
-        glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        gd = ImageDraw.Draw(glow)
-        r = int(min(W, H) * 0.42)
-        gd.ellipse((W//2 - r, H//2 - r, W//2 + r, H//2 + r), fill=(255, 255, 255, 40))
-        background = Image.alpha_composite(background, glow)
-    
-    # >>> When you create your base canvas, paste the background onto it:
-    # (Keep your existing variable; just paste after you create it.)
-    # Example:
-    # canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    # canvas.paste(background, (0, 0))
-
+              
     # --- crossed swords (center)
     swords_path = find_asset(["swords.png", "sword.png", "crossed_swords.png"])
     if swords_path:
