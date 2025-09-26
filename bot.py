@@ -406,7 +406,7 @@ async def bf_start(ctx):
 
     title = f"{ctx.guild.name or 'Bite & Fight'} — Arena"
     subtitle = "Part 1 - Setting The Table"
-    desc = "🍔 to join the fight!\n🍽️ to let the battle begin!"
+    desc = "🍔 to join the fight!\n
     embed = discord.Embed(title=title, description=f"**{subtitle}**\n\n{desc}", color=discord.Color.dark_gold())
 
     # attach a local logo as thumbnail if available
@@ -420,7 +420,7 @@ async def bf_start(ctx):
     else:
         embed.set_thumbnail(url="https://i.imgur.com/4Zb9o2p.png")  # fallback
 
-    embed.add_field(name="Status", value="⚔️ 0 tributes have volunteered", inline=False)
+    embed.add_field(name="Status", value="⚔️ 0 challengers are on the menu", inline=False)
     if game.is_tournament:
         embed.add_field(name="Pot", value=f"💰 {game.pot} • Entry {game.entry_fee}", inline=False)
     embed.set_footer(text=f"Host: {ctx.author.display_name} • Lobby closes in 30s")
@@ -473,7 +473,7 @@ async def bf_begin(ctx):
         timestamp=datetime.datetime.utcnow()
     )
 
-    # Show tributes (names only, no HP)
+    # Show challengers(names only, no HP)
     names_only = "\n".join(p.display_name for p in game.players) or "No tributes"
     embed.add_field(
         name=f"🍔 {len(game.players)} tributes",
