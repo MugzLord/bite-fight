@@ -867,6 +867,15 @@ async def bf_prizes(ctx):
             lines.append(f"#{e['id']} • {e['winner_name']} • {e.get('type')}")
     await ctx.send("Open prizes:\n" + "\n".join(lines))
 
+@bot.command(name="bf_dbg_assets")
+@commands.has_permissions(administrator=True)
+async def bf_dbg_assets(ctx):
+    try:
+        files = ", ".join(sorted(os.listdir("assets"))) or "(empty)"
+        await ctx.send(f"assets/: {files}")
+    except Exception as e:
+        await ctx.send(f"assets/ not readable: {e}")
+
 @bot.command(name="bf_prize_done")
 @commands.has_permissions(administrator=True)
 async def bf_prize_done(ctx, prize_id: int):
