@@ -909,39 +909,7 @@ async def run_game(ctx, game: BiteFightGame):
         if not events:
             events.append("The fighters circle, waiting for an opening.")
 
-        # Pick a key play for the card; grey the loser side
-        key_play = None
-        key_attacker = None
-        key_target = None
-        for e in reversed(events):
-            found = False
-            for a in alive_players(game):
-                for t in game.players:
-                    if a.id == t.id:
-                        continue
-                    if a.display_name in e and t.display_name in e:
-                        key_play = e
-                        key_attacker = a
-                        key_target = t
-                        found = True
-                        break
-                if found:
-                    break
-            if found:
-                break
-
-        file = None
-        if key_play and key_attacker and key_target:
-            try:
-                lower = key_play.lower()
-                fade_left = "miss" in lower  # attacker missed => fade attacker
-                fade_right = not fade_left    # otherwise fade target
-                img_bytes = await build_versus_card(key_attacker, key_target, key_play, grey_left=fade_left, grey_right=fade_right)
-                file = discord.File(img_bytes, filename=f"round_{game.round_num}.png")
-            except Exception as e:
-                print(f"[Bite&Fight] build_versus_card failed: {e}")
-                file = None
-
+        
         hp_board = ", ".join(f"{p.display_name}({game.hp[p.id]})" for p in alive_players(game))
         embed = discord.Embed(
             title=f"Bite & Fight — Round {game.round_num}",
