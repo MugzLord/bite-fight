@@ -298,41 +298,51 @@ async def build_versus_card(
     grey_left: bool = False,
     grey_right: bool = False,
 ) -> BytesIO:
-    W, H = 900, 500
-    bg = Image.new("RGBA", (W, H), (24, 24, 24, 255))
+    from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance
 
-    # Subtle gradient
+    W, H = 900, 500
+    pad = 32
+    face = 360
+
+    # --- background + subtle gradient
+    bg = Image.new("RGBA", (W, H), (24, 24, 24, 255))
     g = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(g)
     for y in range(H):
         a = int(180 * (y / H))
         draw.line([(0, y), (W, y)], fill=(255, 255, 255, int(a * 0.08)))
-    bg = Image.alpha_composite(bg, g)
+    card = Image.alpha_composite(bg, g)
 
-    # Avatar boxes
-    pad = 32
-    face = 360
-    left_xy = (pad, pad)
-    right_xy = (W - pad - face, pad)
+    # --- avatars
+    async def _fetch(member, size=512):
+        try:
+            b = await member.display_avatar.replace(size=size, format="png").read()
+            im = Image.open(BytesIO(b)).convert("RGBA")
+        except Exception:
+            im = Image.new("RGBA", (size, size), (40, 40, 40, 255))
+        return im.resize((size, size), Image.LANCZOS)
 
-    # Fetch avatars
-    la = await fetch_avatar(attacker, size=512)
-    ra = await fetch_avatar(target, size=512)
+    la = await _fetch(attacker)
+    ra = await _fetch(target)
 
-    la = rounded_square(la.resize((face, face), Image.LANCZOS), radius=40)
-    ra = rounded_square(ra.resize((face, face), Image.LANCZOS), radius=40)
+    def _rounded(im, radius=40):
+        mask = Image.new("L", im.size, 0)
+        ImageDraw.Draw(mask).rounded_rectangle((0, 0, *im.size), radius=radius, fill=255)
+        im.putalpha(mask)
+        return im
+
+    la = _rounded(la.resize((face, face), Image.LANCZOS))
+    ra = _rounded(ra.resize((face, face), Image.LANCZOS))
 
     if grey_left:
-        la = grey_out(la)
+        la = ImageEnhance.Brightness(ImageOps.grayscale(la).convert("RGBA")).enhance(0.55)
     if grey_right:
-        ra = grey_out(ra)
+        ra = ImageEnhance.Brightness(ImageOps.grayscale(ra).convert("RGBA")).enhance(0.55)
 
-    # Compose avatars
-    card = bg.copy()
-    card.alpha_composite(la, dest=left_xy)
-    card.alpha_composite(ra, dest=right_xy)
+    card.alpha_composite(la, dest=(pad, pad))
+    card.alpha_composite(ra, dest=(W - pad - face, pad))
 
-    # Crossed swords overlay (center)
+    # --- crossed swords (center)
     swords_path = find_asset(["swords.png", "sword.png", "crossed_swords.png"])
     if swords_path:
         try:
@@ -345,31 +355,27 @@ async def build_versus_card(
             card.alpha_composite(swords, dest=(sx, sy))
         except Exception as e:
             print(f"[Bite&Fight] swords overlay failed: {e}")
-    else:
-        print("[Bite&Fight] swords asset not found")
 
-        # --- Logo watermark (top-right) ---
-        logo_path = find_asset(["logo.png", "logo.jpg", "logo.jpeg"])
-        if logo_path:
-            try:
-                logo = Image.open(logo_path).convert("RGBA")
-                # scale to ~18% of card width
-                maxw = int(W * 0.18)
-                scale = min(maxw / logo.width, 1.0)
-                lw, lh = int(logo.width * scale), int(logo.height * scale)
-                logo = logo.resize((lw, lh), Image.LANCZOS)
-    
-                # soften opacity
-                *_, a = logo.split()
-                a = a.point(lambda p: int(p * 0.75))
-                logo.putalpha(a)
+    # --- logo watermark (top-right, semi-transparent)
+    logo_path = find_asset(["logo.png", "logo.jpg", "logo.jpeg"])
+    if logo_path:
+        try:
+            logo = Image.open(logo_path).convert("RGBA")
+            maxw = int(W * 0.18)                  # ~18% of card width
+            scale = min(maxw / logo.width, 1.0)
+            lw, lh = int(logo.width * scale), int(logo.height * scale)
+            logo = logo.resize((lw, lh), Image.LANCZOS)
 
-                card.alpha_composite(logo, dest=(W - lw - 16, 16))
-            except Exception as e:
-                print(f"[Bite&Fight] logo overlay failed: {e}")
+            # soften opacity
+            *rgb, a = logo.split()
+            a = a.point(lambda p: int(p * 0.80))
+            logo.putalpha(a)
 
+            card.alpha_composite(logo, dest=(W - lw - 16, 16))
+        except Exception as e:
+            print(f"[Bite&Fight] logo overlay failed: {e}")
 
-    # Action text strip at bottom
+    # --- action text strip
     strip_h = 92
     strip = Image.new("RGBA", (W - pad * 2, strip_h), (0, 0, 0, 170))
     card.alpha_composite(strip, dest=(pad, H - pad - strip_h))
@@ -388,11 +394,11 @@ async def build_versus_card(
     ty = H - pad - strip_h + (strip_h - fnt.getbbox(text)[3]) // 2 - 6
     draw.text((tx, ty), text, font=fnt, fill=(255, 255, 255, 255))
 
-    # Return as bytes for Discord upload
     buf = BytesIO()
     card.convert("RGB").save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return buf
+
 
 # =========================
 # Commands
@@ -437,8 +443,8 @@ async def bf_start(ctx):
     view = LobbyView(game, host=ctx.author, timeout=30.0)
     game.lobby_view = view
 
-    msg = await ctx.send(embed=embed, view=view, files=files) if files else \
-          await ctx.send(embed=embed, view=view)
+    # SEND WITHOUT ANY FILE ATTACHMENT (no logo in lobby)
+    msg = await ctx.send(embed=embed, view=view)
     view.message = msg
 
     async def lobby_timer():
@@ -610,6 +616,134 @@ async def run_game(ctx, game: BiteFightGame):
         alive_now = alive_players(game)
         if len(alive_now) <= 1:
             winner = alive_now[0] if alive_now else None
+        
+            # --- 1) POST FINAL ROUND SUMMARY FIRST ---
+            # Pick a key play/image just like the normal rounds
+            key_play = None
+            key_attacker = None
+            key_target = None
+            for e in reversed(events):
+                found = False
+                for a in alive_players(game) + [p for p in game.players if p not in alive_players(game)]:
+                    for t in game.players:
+                        if a.id == t.id:
+                            continue
+                        if a.display_name in e and t.display_name in e:
+                            key_play = e
+                            key_attacker = a
+                            key_target = t
+                            found = True
+                            break
+                    if found:
+                        break
+                if found:
+                    break
+        
+            file = None
+            if key_play and key_attacker and key_target:
+                try:
+                    lower = key_play.lower()
+                    fade_left = "miss" in lower             # attacker missed => grey attacker
+                    fade_right = not fade_left              # otherwise grey target (took the hit)
+                    img_bytes = await build_versus_card(
+                        key_attacker, key_target, key_play,
+                        grey_left=fade_left, grey_right=fade_right
+                    )
+                    file = discord.File(img_bytes, filename=f"round_{game.round_num}.png")
+                except Exception:
+                    file = None
+        
+            hp_board = ", ".join(f"{p.display_name}({game.hp[p.id]})" for p in game.players)
+            final_round = discord.Embed(
+                title=f"Bite & Fight — Round {game.round_num} Summary",
+                description=line("round_intro", game.banter) or "",
+                color=discord.Color.dark_red(),
+                timestamp=datetime.datetime.utcnow()
+            )
+            final_round.add_field(name="Events", value="\n".join(events)[:1024], inline=False)
+            final_round.add_field(name="HP", value=hp_board[:1024], inline=False)
+            if file:
+                final_round.set_image(url=f"attachment://round_{game.round_num}.png")
+                await game.channel.send(embed=final_round, file=file)
+            else:
+                await game.channel.send(embed=final_round)
+        
+            # --- 2) THEN DO STATS + WINNER EMBED ---
+            ended_at = datetime.datetime.utcnow()
+            dur_secs = int((ended_at - game.start_time).total_seconds()) if game.start_time else 0
+        
+            stats = _load_stats()
+            guild_id = ctx.guild.id if ctx.guild else "dm"
+            if str(guild_id) not in stats["guilds"]:
+                stats["guilds"][str(guild_id)] = {"wins": {}, "kills": {}}
+            if winner:
+                _bump(stats["global"]["wins"], winner.id, 1)
+                _bump(stats["guilds"][str(guild_id)]["wins"], winner.id, 1)
+            for uid, k in game.kills.items():
+                if k > 0:
+                    _bump(stats["global"]["kills"], uid, k)
+                    _bump(stats["guilds"][str(guild_id)]["kills"], uid, k)
+            _save_stats(stats)
+        
+            # (optional tournament accounting remains as you had it;
+            # keep building 'actual_prize_mode' and 'prize_note' if you still
+            # need wishlist logging—see next patch for the embed text)
+        
+            # Recreate/keep your tourney state handling here...
+            # make sure you still update games_played, tstats, etc.
+            # and set variables: actual_prize_mode (str or None), prize_note (str)
+        
+            # --- Winner embed (no credit payout line) ---
+            total_kills_this_match = sum(game.kills.values())
+            wins_in_server = stats["guilds"][str(guild_id)]["wins"].get(str(winner.id), 0) if winner else 0
+            wins_global = stats["global"]["wins"].get(str(winner.id), 0) if winner else 0
+        
+            title = "Bite & Fight — Winner"
+            top_line = f"{winner.display_name} wins in {ctx.guild.name if ctx.guild else 'this arena'}!" if winner else "No winner. Everyone fell."
+            embed = discord.Embed(
+                title=title,
+                description=f"🏆 {top_line}",
+                color=discord.Color.gold(),
+                timestamp=datetime.datetime.utcnow()
+            )
+            if winner:
+                embed.add_field(name="Total kills (match)", value=f"💀 {total_kills_this_match}", inline=True)
+                embed.add_field(name="Time survived", value=f"⏱️ {dur_secs}s", inline=True)
+                embed.add_field(name="\u200b", value="\u200b", inline=True)
+                embed.add_field(name="Wins in this server", value=f"🏆 {wins_in_server}", inline=True)
+                embed.add_field(name="Wins globally", value=f"🌍 {wins_global}", inline=True)
+        
+            if game.is_tournament:
+                s = _tourney_state_load()
+                embed.add_field(name="Pot", value=f"💰 {game.pot}", inline=True)
+                embed.add_field(name="Entry per player", value=f"{game.entry_fee}", inline=True)
+                # Always show the prize mode
+                if 'actual_prize_mode' in locals() and actual_prize_mode:
+                    embed.add_field(name="Prize mode", value=actual_prize_mode.title(), inline=True)
+                # SHOW A PRIZE LINE ONLY FOR WISHLIST — not for credits
+                if 'actual_prize_mode' in locals() and actual_prize_mode == "wishlist" and prize_note:
+                    embed.add_field(name="Prize", value=prize_note[:1024], inline=False)
+                embed.add_field(
+                    name="\u200b",
+                    value=f"Games {s.get('games_played',0)}/{s.get('games_target',0)}",
+                    inline=False
+                )
+        
+            # final HP list for posterity
+            board = "\n".join(
+                f"{p.display_name}: {game.hp.get(p.id, 0)} HP"
+                for p in game.players
+            ) or "No combatants."
+            embed.add_field(name="Final HP", value=board[:1024], inline=False)
+        
+            await game.channel.send(embed=embed)
+        
+            # (optional: post the rolling tournament leaderboard here if you had that)
+            # ... keep your existing leaderboard code ...
+        
+            game.reset()
+            return
+
 
             # Compute time survived
             ended_at = datetime.datetime.utcnow()
@@ -641,8 +775,9 @@ async def run_game(ctx, game: BiteFightGame):
 
                 if winner:
                     if actual_prize_mode == "credits":
+                        # Still log credits to the ledger if you want,
+                        # but DO NOT set a prize_note (so nothing shows in the embed).
                         payout = game.pot
-                        prize_note = f"Payout: {payout} credits"
                         L = _prizes_load()
                         L["seq"] += 1
                         L["open"].append({
@@ -653,7 +788,9 @@ async def run_game(ctx, game: BiteFightGame):
                             "tournament_id": tid
                         })
                         _prizes_save(L)
+                        prize_note = ""   # <-- important: no text for credits
                     else:
+                        # Wishlist case: keep a visible note.
                         L = _prizes_load()
                         L["seq"] += 1
                         entry = {
@@ -669,6 +806,7 @@ async def run_game(ctx, game: BiteFightGame):
                         L["open"].append(entry)
                         _prizes_save(L)
                         prize_note = f"Wishlist x{entry['count']} (Prize ID #{entry['id']})"
+
 
                 # Per-tournament stats
                 all_ts = _tourney_stats_all()
@@ -709,15 +847,10 @@ async def run_game(ctx, game: BiteFightGame):
                 embed.add_field(name="Entry per player", value=f"{game.entry_fee}", inline=True)
                 if actual_prize_mode:
                     embed.add_field(name="Prize mode", value=actual_prize_mode.title(), inline=True)
-                if prize_note:
+                # Show Prize line only for wishlist mode
+                if actual_prize_mode == "wishlist" and prize_note:
                     embed.add_field(name="Prize", value=prize_note[:1024], inline=False)
-                embed.add_field(name="\u200b", value=f"Games {s.get('games_played',0)}/{s.get('games_target',0)}", inline=False)
 
-            board = "\n".join(f"{p.display_name}: {game.hp.get(p.id, 0)} HP" for p in game.players) or "No combatants."
-            embed.add_field(name="Final HP", value=board[:1024], inline=False)
-
-            if events:
-                embed.add_field(name=f"Round {game.round_num} Summary", value="\n".join(events)[:1024], inline=False)
 
             await game.channel.send(embed=embed)
 
