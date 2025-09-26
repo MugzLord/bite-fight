@@ -522,8 +522,7 @@ async def bf_start(ctx):
     game.lobby_view = view
     
     embed = brand_embed(embed)
-    msg = await ctx.send(embed=embed, view=view)
-
+    msg = await ctx.send(embed=embed, view=view, files=files)
 
     view.message = msg
 
@@ -590,7 +589,7 @@ async def bf_begin(ctx):
 
     embed.set_footer(text=f"Host: {ctx.author.display_name}")
     embed = brand_embed(embed)
-    await ctx.send(embed=embed)
+    await ctx.send(embed=embed, files=files)
 
 
     # run rounds; if anything blows up, show it so it doesn't look "stuck"
@@ -849,11 +848,9 @@ async def run_game(ctx, game: BiteFightGame):
             embed.set_image(url=f"attachment://round_{game.round_num}.png")
             files.append(file)
         
-        embed = brand_embed(embed)
-        if files:
-            await game.channel.send(embed=embed, files=files)  # only the round image in files
-        else:
-            await game.channel.send(embed=embed)
+        # MUST unpack and pass files
+        embed, files = brand_embed(embed, files_list=files)
+        await game.channel.send(embed=embed, files=files)
 
 
 
