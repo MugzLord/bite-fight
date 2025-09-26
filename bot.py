@@ -229,7 +229,7 @@ class LobbyView(discord.ui.View):
         names = ", ".join(p.display_name for p in self.game.players) or "None yet"
         await interaction.response.send_message(f"Current tributes: {names}", ephemeral=True)
 
-    @discord.ui.button(label="Let the battle begin", emoji="🍽️", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label= emoji="🍽️", style=discord.ButtonStyle.primary)
     async def start_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.host.id:
             return await interaction.response.send_message("Only the host can start.", ephemeral=True)
