@@ -533,7 +533,7 @@ async def bf_begin(ctx):
         await ctx.send(f"⚠️ Game crashed: `{e}`")
         
 async def build_profile_card(member: discord.Member) -> BytesIO:
-    # simple card: rounded avatar + name
+    # avatar
     try:
         b = await member.display_avatar.replace(size=512, format="png").read()
         av = Image.open(BytesIO(b)).convert("RGBA")
@@ -541,14 +541,24 @@ async def build_profile_card(member: discord.Member) -> BytesIO:
         av = Image.new("RGBA", (512, 512), (40, 40, 40, 255))
     av = av.resize((512, 512), Image.LANCZOS)
 
+    # round it
     m = Image.new("L", (512, 512), 0)
     ImageDraw.Draw(m).rounded_rectangle((0, 0, 512, 512), radius=40, fill=255)
     av.putalpha(m)
 
+    # canvas = your versus background (fallback to dark if missing)
     W, H = 900, 500
-    canvas = Image.new("RGBA", (W, H), (20, 20, 24, 255))
+    try:
+        bg_path = find_asset(["versus_bg.png", "versus_bg.jpg", "bf bg.png"])
+        background = Image.open(bg_path).convert("RGBA").resize((W, H), Image.LANCZOS)
+    except Exception:
+        background = Image.new("RGBA", (W, H), (20, 20, 24, 255))
+    canvas = background.copy()
+
+    # place avatar
     canvas.paste(av, (32, 32), av)
 
+    # name text
     draw = ImageDraw.Draw(canvas)
     try:
         fnt = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 44)
@@ -556,11 +566,10 @@ async def build_profile_card(member: discord.Member) -> BytesIO:
         fnt = ImageFont.load_default()
     draw.text((560, 60), member.display_name, fill=(255, 255, 255, 255), font=fnt)
 
-    buf = BytesIO()
-    canvas.convert("RGB").save(buf, format="PNG", optimize=True)
-    buf.seek(0)
-    return buf
-
+    out = BytesIO()
+    canvas.convert("RGB").save(out, format="PNG", optimize=True)
+    out.seek(0)
+    return out
 
 @bot.command(name="bf_stop")
 async def bf_stop(ctx):
@@ -804,23 +813,30 @@ async def run_game(ctx, game: BiteFightGame):
                 # w_embed.set_image(url="attachment://winner.png")
             
           
-            # --- POST PROFILE IMAGE ABOVE THE WINNER EMBED (Pixxie-style, no buttons)
+            # --- POST PROFILE IMAGE ABOVE THE WINNER EMBED (Pixxie-style)
             if winner:
                 try:
-                    buf = await build_profile_card(winner)  # if you added this helper
+                    buf = await build_profile_card(winner)  # uses versus_bg as background (see step 2)
                 except Exception:
-                    # fallback: just send the avatar
                     av_bytes = await winner.display_avatar.replace(size=512, format="png").read()
                     buf = BytesIO(av_bytes)
                 await game.channel.send(file=discord.File(buf, filename="profile.png"))
             
-            # --- THEN SEND THE WINNER EMBED
-            if files_to_send:
-                await game.channel.send(embed=w_embed, files=files_to_send)
-            else:
-                await game.channel.send(embed=w_embed)
-
+            # --- ADD "My Stats" BUTTON (acts like !bf_profile)
+            view = discord.ui.View(timeout=None)
+            if winner:
+                view.add_item(discord.ui.Button(
+                    label="My Stats",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id=f"bf_stats:{winner.id}",
+                ))
             
+            # --- SEND THE WINNER EMBED (keep your two-branch structure)
+            if files_to_send:
+                await game.channel.send(embed=w_embed, files=files_to_send, view=view)
+            else:
+                await game.channel.send(embed=w_embed, view=view)
+
 
             game.reset()
             return
@@ -1052,16 +1068,45 @@ async def bf_cardtest(ctx, left: discord.Member=None, right: discord.Member=None
 async def on_interaction(interaction: discord.Interaction):
     data = interaction.data or {}
     cid = data.get("custom_id", "")
+
+    # --- profile image (from the winner button above the embed)
     if interaction.type.name == "component" and cid.startswith("bf_profile:"):
         uid = int(cid.split(":")[1])
         member = interaction.guild.get_member(uid) or await interaction.client.fetch_user(uid)
 
-        # reuse your existing profile builder
         buf = await build_profile_card(member)
-        file = discord.File(buf, filename="profile.png")
+        await interaction.response.send_message(  # <-- SEND THE FILE HERE
+            file=discord.File(buf, filename="profile.png"),
+            ephemeral=True
+        )
+        return  # ensure we don't try to respond again
 
-        # show profile to the clicker; ephemeral = only they see it
-        await interaction.response.send_message(file=file, ephemeral=True)
+    # --- stats button (acts like !bf_profile)
+    elif interaction.type.name == "component" and cid.startswith("bf_stats:"):
+        uid = int(cid.split(":")[1])
+        member = interaction.guild.get_member(uid) or await interaction.client.fetch_user(uid)
+
+        stats = _load_stats()
+        gid = str(interaction.guild.id) if interaction.guild else "dm"
+        g = stats.get("guilds", {}).get(gid, {"wins": {}, "kills": {}})
+        wins_server = g["wins"].get(str(uid), 0)
+        kills_server = g["kills"].get(str(uid), 0)
+        wins_global = stats["global"]["wins"].get(str(uid), 0)
+        kills_global = stats["global"]["kills"].get(str(uid), 0)
+
+        e = discord.Embed(
+            title=f"Bite & Fight — {member.display_name}",   # <-- use member.display_name
+            color=discord.Color.dark_gold()
+        )
+        e.add_field(name="Wins (this server)", value=f"{wins_server}", inline=True)
+        e.add_field(name="Wins (global)", value=f"{wins_global}", inline=True)
+        e.add_field(name="\u200b", value="\u200b", inline=True)
+        e.add_field(name="Kills (this server)", value=f"{kills_server}", inline=True)
+        e.add_field(name="Kills (global)", value=f"{kills_global}", inline=True)
+
+        await interaction.response.send_message(embed=e, ephemeral=True)
+        return
+
 
 # =========================
 # Lifecycle
