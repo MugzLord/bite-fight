@@ -286,6 +286,21 @@ def pick_target(game: BiteFightGame, attacker: discord.Member):
 def clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# Text HP bar (fixes NameError: hp_bar is not defined)
+def hp_bar(current: int, maximum: int, width: int = 18) -> str:
+    """Return a slim text HP bar like [██████      ] sized by 'width'."""
+    if maximum <= 0:
+        maximum = 1
+    ratio = max(0.0, min(1.0, float(current) / float(maximum)))
+    filled = int(round(ratio * width))
+    # ensure a tiny sliver shows for nonzero HP
+    if current > 0 and filled == 0:
+        filled = 1
+    empty = width - filled
+    return "[" + ("█" * filled) + (" " * empty) + "]"
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
 # ---- Versus Card (swords overlay + greying loser) ----
 async def fetch_avatar(member: discord.Member, size=256) -> Image.Image:
     try:
@@ -367,7 +382,7 @@ async def build_versus_card(
     card.alpha_composite(ra, dest=(W - pad - face, pad))
 
     # --- winner/loser ribbons + badges ---
-    rb_h = 120  # big badge band
+    rb_h = 100  # big badge band
     left_rect  = (pad, pad + face - rb_h, pad + face, pad + face)
     right_rect = (W - pad - face, pad + face - rb_h, W - pad, pad + face)
 
@@ -417,7 +432,7 @@ async def build_versus_card(
         
             # text fallback (also bigger)
             try:
-                f = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 64)
+                f = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 50)
             except Exception:
                 f = ImageFont.load_default()
             label = "RIP" if kind == "rip" else "WIN"
@@ -1346,7 +1361,6 @@ async def on_interaction(interaction: discord.Interaction):
 
         await interaction.response.send_message(embed=e, ephemeral=True)
         return
-
 
 # =========================
 # Lifecycle
