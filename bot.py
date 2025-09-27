@@ -158,7 +158,7 @@ class BiteFightGame:
     def reset(self):
         self.in_lobby = False
         self.running = False
-               self.players = []
+        self.players = []
         self.hp.clear()
         self.bleed.clear()
         self.round_num = 0
