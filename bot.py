@@ -162,7 +162,7 @@ class BiteFightGame:
         self.hp.clear()
         self.bleed.clear()
         self.round_num = 0
-        self.task = None
+               self.task = None
         self.lobby_view = None
         self._ctx = None
         self.start_time = None
@@ -205,7 +205,6 @@ class LobbyView(discord.ui.View):
             return
         embed = self.message.embeds[0]
         joined = len(self.game.players)
-        # keep the same title/description/color/etc., just refresh footer text
         embed.set_footer(text=f"Host: {self.game._ctx.author.display_name} • Lobby closes in 30s • {joined} joined")
         try:
             await self.message.edit(embed=embed, view=self)
@@ -213,7 +212,6 @@ class LobbyView(discord.ui.View):
             pass
 
     async def update_counter(self):
-        # no Status field anymore, only footer is updated
         await self._set_footer()
 
     @discord.ui.button(label="Join", emoji="🍔", style=discord.ButtonStyle.success)
@@ -285,21 +283,6 @@ def pick_target(game: BiteFightGame, attacker: discord.Member):
 
 def clamp(v, lo, hi):
     return max(lo, min(hi, v))
-
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# Text HP bar (fixes NameError: hp_bar is not defined)
-def hp_bar(current: int, maximum: int, width: int = 18) -> str:
-    """Return a slim text HP bar like [██████      ] sized by 'width'."""
-    if maximum <= 0:
-        maximum = 1
-    ratio = max(0.0, min(1.0, float(current) / float(maximum)))
-    filled = int(round(ratio * width))
-    # ensure a tiny sliver shows for nonzero HP
-    if current > 0 and filled == 0:
-        filled = 1
-    empty = width - filled
-    return "[" + ("█" * filled) + (" " * empty) + "]"
-# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 # ---- Versus Card (swords overlay + greying loser) ----
 async def fetch_avatar(member: discord.Member, size=256) -> Image.Image:
@@ -382,7 +365,7 @@ async def build_versus_card(
     card.alpha_composite(ra, dest=(W - pad - face, pad))
 
     # --- winner/loser ribbons + badges ---
-    rb_h = 100  # big badge band
+    rb_h = 120  # big badge band
     left_rect  = (pad, pad + face - rb_h, pad + face, pad + face)
     right_rect = (W - pad - face, pad + face - rb_h, W - pad, pad + face)
 
@@ -414,14 +397,12 @@ async def build_versus_card(
                     ic = Image.open(path).convert("RGBA")
         
                     # --- BIGGER BADGE ---
-                    # allow the icon to be wider than the ribbon and taller than the ribbon
-                    max_w_frac = 0.80      # up to 80% of the face width
-                    overshoot   = 1.80     # 180% of ribbon height (overlap above the band)
+                    max_w_frac = 0.80
+                    overshoot   = 1.80
         
                     scale = min((rw * max_w_frac) / ic.width, (rh * overshoot) / ic.height)
                     ic = ic.resize((max(1, int(ic.width * scale)), max(1, int(ic.height * scale))), Image.LANCZOS)
         
-                    # center horizontally; lift it so ~40% sits above the ribbon
                     px = x0 + (rw - ic.width) // 2
                     py = y0 + (rh - ic.height) // 2 - int(rh * 0.40)
         
@@ -430,9 +411,9 @@ async def build_versus_card(
                 except Exception:
                     pass
         
-            # text fallback (also bigger)
+            # text fallback
             try:
-                f = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 50)
+                f = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 64)
             except Exception:
                 f = ImageFont.load_default()
             label = "RIP" if kind == "rip" else "WIN"
@@ -440,7 +421,6 @@ async def build_versus_card(
             px = x0 + (rw - tw) // 2
             py = y0 + (rh - th) // 2 - int(rh * 0.20)
             ImageDraw.Draw(card).text((px, py), label, font=f, fill=(255,255,255,255))
-
 
         _paste_badge(left_badge,  left_rect)
         _paste_badge(right_badge, right_rect)
@@ -488,26 +468,21 @@ async def build_versus_card(
         stroke_fill=(0, 0, 0, 180),
     )
 
-    # --- Catfight-style HP sliders (optional, drawn in a bottom footer) ---
+    # --- Catfight-style HP sliders (optional) ---
     if left_hp is not None and right_hp is not None and max_hp:
-        # extend canvas with a dedicated footer area so nothing overlaps
         footer_h = 64
-        new_card = Image.new("RGBA", (W, H + footer_h), (24, 24, 24, 255))  # dark footer
+        new_card = Image.new("RGBA", (W, H + footer_h), (24, 24, 24, 255))
         new_card.alpha_composite(card, dest=(0, 0))
         card = new_card
-        H = H + footer_h  # update height for following math
+        H = H + footer_h
     
         def _draw_slider(x, y, w, h, pct, fill_rgb):
             pct = max(0.0, min(1.0, float(pct)))
             r = h // 2
-    
-            # track (soft grey)
             track = Image.new("RGBA", (w, h), (0, 0, 0, 0))
             d = ImageDraw.Draw(track)
             d.rounded_rectangle((0, 0, w, h), radius=r, fill=(180, 180, 180, 160))
             card.alpha_composite(track, dest=(x, y))
-    
-            # fill (keep rounded ends visible for tiny values)
             fw = int(w * pct)
             if 0 < fw < r * 2:
                 fw = r * 2
@@ -516,31 +491,20 @@ async def build_versus_card(
                 df = ImageDraw.Draw(fill)
                 df.rounded_rectangle((0, 0, fw, h), radius=r, fill=(*fill_rgb, 230))
                 card.alpha_composite(fill, dest=(x, y))
-    
-            # subtle highlight
             hi = Image.new("RGBA", (w, h // 2), (255, 255, 255, 30))
             card.alpha_composite(hi, dest=(x, y))
     
-        # bar geometry (in the footer, vertically centered)
         bar_h = 22
         left_x  = pad
         right_x = W - pad - face
         bar_w   = face
-        y0 = H - footer_h + (footer_h - bar_h) // 2  # centered in footer
-    
-        # colours (Catfight-like)
-        green = (46, 204, 113)   # left
-        pink  = (236, 64, 122)   # right
-    
-        # percentages
+        y0 = H - 64 + (64 - bar_h) // 2
+        green = (46, 204, 113)
+        pink  = (236, 64, 122)
         lp = (left_hp / max_hp) if max_hp else 0.0
         rp = (right_hp / max_hp) if max_hp else 0.0
-    
-        # draw bars
         _draw_slider(left_x,  y0, bar_w, bar_h, lp, green)
         _draw_slider(right_x, y0, bar_w, bar_h, rp, pink)
-    
-        # percent labels (white, to the right of each bar)
         try:
             pf = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
         except Exception:
@@ -552,8 +516,6 @@ async def build_versus_card(
         draw.text((left_x  + bar_w + 10, y0 + (bar_h - th)//2 - 2), lw, font=pf, fill=(255,255,255,255))
         th = pf.getbbox(rw)[3]
         draw.text((right_x + bar_w + 10, y0 + (bar_h - th)//2 - 2), rw, font=pf, fill=(255,255,255,255))
-    # --- end sliders ---
-
 
     buf = BytesIO()
     card.convert("RGB").save(buf, format="PNG", optimize=True)
@@ -783,10 +745,6 @@ def build_hp_panel_image(game) -> BytesIO:
         bar_y = y + (row_h - bar_h)//2
         draw_slider(bar_x, bar_y, bar_w, bar_h, pct, col)
 
-        # color-coded fill (same thresholds you wanted)
-        fill = "🟩" if pct >= 2/3 else ("🟨" if pct >= 1/3 else "🟥")
-        empty = "⬛"
-
         # % label
         label = f"{int(round(pct*100))}%"
         d.text((bar_x + bar_w + 12, bar_y - 2), label, font=f_pct, fill=(255, 255, 255, 255))
@@ -961,16 +919,7 @@ async def run_game(ctx, game: BiteFightGame):
         )
         embed.add_field(name="Events", value="\n".join(events)[:1024], inline=False)
 
-        # pretty life bars for ALL players (alive or 0 HP)
-        lines_hp = []
-        for p in game.players:
-            hp = game.hp.get(p.id, 0)
-            pct = int(round(100 * hp / game.max_hp)) if game.max_hp else 0
-            bar = hp_bar(hp, game.max_hp, width=18)
-            status = "🏆" if hp > 0 else "💀"
-            # name on the left, bar centred in a code span, percent on the right
-            lines_hp.append(f"{status} **{p.display_name}**\n{bar} {pct}%")
-        embed.add_field(name="HP", value="\n".join(lines_hp)[:1024], inline=False)
+        # ⛔️ Removed ONLY the inline HP field from the embed
 
         files = []
         if file is not None:
@@ -981,9 +930,9 @@ async def run_game(ctx, game: BiteFightGame):
         embed, files = brand_embed(embed, files_list=files)
         await game.channel.send(embed=embed, files=files)
 
+        # ✅ Keep posting the HP panel image each round
         hp_panel = build_hp_panel_image(game)
         await game.channel.send(file=discord.File(hp_panel, filename=f"hp_{game.round_num}.png"))
-
 
         # -------- end condition & winner embed --------
         alive_now = alive_players(game)
@@ -1020,7 +969,6 @@ async def run_game(ctx, game: BiteFightGame):
             
                 if winner:
                     _bump(ts["wins"], winner.id, 1)
-                    # credit the winner with this game's pot; change to a fixed value if you prefer
                     _bump(ts["credits_won"], winner.id, game.pot)
             
                 for uid, k in game.kills.items():
@@ -1033,7 +981,6 @@ async def run_game(ctx, game: BiteFightGame):
                 all_ts[tid] = ts
                 _tourney_stats_save(all_ts)
             
-                # reflect progress on the active tournament
                 state["games_played"] = int(state.get("games_played", 0)) + 1
                 _tourney_state_save(state)
 
@@ -1361,6 +1308,7 @@ async def on_interaction(interaction: discord.Interaction):
 
         await interaction.response.send_message(embed=e, ephemeral=True)
         return
+
 
 # =========================
 # Lifecycle
