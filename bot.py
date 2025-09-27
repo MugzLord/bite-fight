@@ -701,9 +701,9 @@ def build_hp_panel_image(game) -> BytesIO:
     players = list(game.players)
     n = max(1, len(players))
     W = 900
-    row_h = 40
+    row_h = 44
     pad = 12
-    name_w = 280
+    name_w = 300
     bar_h = 12
     H = pad * 2 + n * row_h
 
@@ -718,18 +718,23 @@ def build_hp_panel_image(game) -> BytesIO:
         #f_name = f_pct = ImageFont.load_default()
 
     # try to load a real TTF from your repo first
-    font_path = find_asset([
-        "DejaVuSans-Bold.ttf",     # put this file in /assets
-        "arialbd.ttf",
-        "Arial Bold.ttf"
-    ]) or "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    # ---- fonts (force a real TTF; never use tiny bitmap fallback) ----
+    import os, PIL  # add PIL import for packaged font path
+    pil_ttf = os.path.join(os.path.dirname(PIL.__file__), "fonts", "DejaVuSans-Bold.ttf")
+    
+    # try assets first, then Pillow's packaged font, then system path
+    font_path = (find_asset(["DejaVuSans-Bold.ttf", "arialbd.ttf", "Arial Bold.ttf"])
+                 or (pil_ttf if os.path.exists(pil_ttf) else None)
+                 or "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
     
     try:
-        f_name = ImageFont.truetype(font_path, 30)  # bigger, bold
-        f_pct  = ImageFont.truetype(font_path, 26)
+        # bigger so it reads after Discord scales the image
+        f_name = ImageFont.truetype(font_path, 32)   # names (left)
+        f_pct  = ImageFont.truetype(font_path, 28)   # percent (right)
     except Exception:
-        # last resort — tiny bitmap font (avoid if possible)
+        # last resort (will be tiny) — but with the PIL path above, this should not trigger
         f_name = f_pct = ImageFont.load_default()
+
 
 
 
