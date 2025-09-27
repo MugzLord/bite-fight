@@ -27,6 +27,7 @@ STATS_FILE = os.getenv("BF_STATS_FILE", "bf_stats.json")                 # globa
 TOURNEY_STATE_FILE = os.getenv("BF_TOURNEY_STATE", "bf_tourney.json")    # current tournament state
 TOURNEY_STATS_FILE = os.getenv("BF_TOURNEY_STATS", "bf_tourney_stats.json")  # per-tournament stats
 PRIZES_FILE = os.getenv("BF_PRIZES_FILE", "bf_prizes.json")              # wishlist/credit prize ledger
+# (removed confusing global `files` variable)
 
 # Per-channel default ante (used when starting a new tournament)
 CHANNEL_ANTE = defaultdict(lambda: int(os.getenv("BF_ANTE", "100")))
@@ -322,8 +323,6 @@ async def build_versus_card(
     pad = 32
     face = 360
 
-
-
     # --- background image base (versus_bg.png)
     from pathlib import Path
     try:
@@ -423,8 +422,6 @@ async def build_versus_card(
         _paste_badge(right_badge, right_rect)
     # --- end winner/loser ribbons
 
-
-              
     # --- crossed swords (center)
     swords_path = find_asset(["swords.png", "sword.png", "crossed_swords.png"])
     if swords_path:
@@ -523,8 +520,7 @@ async def bf_start(ctx):
     
     embed, brand_files = brand_embed(embed)
     msg = await ctx.send(embed=embed, view=view, files=brand_files)
-
-
+    view.message = msg
 
     async def lobby_timer():
         await asyncio.sleep(15)
@@ -590,7 +586,6 @@ async def bf_begin(ctx):
     embed, brand_files = brand_embed(embed)
     await ctx.send(embed=embed, files=brand_files)
 
-
     # run rounds; if anything blows up, show it so it doesn't look "stuck"
     try:
         await run_game(ctx, game)
@@ -651,13 +646,6 @@ def brand_embed(embed: discord.Embed, files_list=None):
     if path:
         files.append(discord.File(path, filename="bf_logo.png"))
         embed.set_thumbnail(url="attachment://bf_logo.png")
-    return embed, files
-
-
-    files.append(discord.File(path, filename="bf_logo.png"))
-    # preserve whatever footer text you already set
-    footer_text = getattr(embed.footer, "text", None) or ""
-    embed.set_footer(text=footer_text, icon_url="attachment://bf_logo.png")
     return embed, files
 
 #--commands--#
@@ -811,14 +799,14 @@ async def run_game(ctx, game: BiteFightGame):
             except Exception:
                 file = None  # never crash a round just for the art
 
-                # -------- build the round embed --------
-                embed = discord.Embed(
-                    title=f"Bite & Fight — Round {game.round_num}",
-                    description=line("round_intro", game.banter) or "",
-                    color=discord.Color.dark_red(),
-                    timestamp=datetime.datetime.utcnow()
-                )
-                embed.add_field(name="Events", value="\n".join(events)[:1024], inline=False)
+        # -------- build the round embed (always) --------
+        embed = discord.Embed(
+            title=f"Bite & Fight — Round {game.round_num}",
+            description=line("round_intro", game.banter) or "",
+            color=discord.Color.dark_red(),
+            timestamp=datetime.datetime.utcnow()
+        )
+        embed.add_field(name="Events", value="\n".join(events)[:1024], inline=False)
 
         # pretty life bars for ALL players (alive or 0 HP)
         lines_hp = []
@@ -831,7 +819,6 @@ async def run_game(ctx, game: BiteFightGame):
             lines_hp.append(f"{status} **{p.display_name}**\n`{bar}` {pct}%")
         embed.add_field(name="HP", value="\n".join(lines_hp)[:1024], inline=False)
 
-
         files = []
         if file is not None:
             embed.set_image(url=f"attachment://round_{game.round_num}.png")
@@ -840,8 +827,6 @@ async def run_game(ctx, game: BiteFightGame):
         # MUST unpack and pass files
         embed, files = brand_embed(embed, files_list=files)
         await game.channel.send(embed=embed, files=files)
-
-
 
         # -------- end condition & winner embed --------
         alive_now = alive_players(game)
@@ -925,10 +910,7 @@ async def run_game(ctx, game: BiteFightGame):
             
             # small Bite & Fight logo INSIDE the embed (via brand_embed)
             files_to_send = []
-            # small Bite & Fight logo INSIDE the embed
-            w_embed, files_to_send = brand_embed(w_embed)   # ✅ correct (files_to_send comes back with the logo file)
-
-
+            w_embed, files_to_send = brand_embed(w_embed)   # returns (embed, files)
             
             # --- POST PROFILE IMAGE ABOVE THE WINNER EMBED
             if winner:
@@ -956,8 +938,6 @@ async def run_game(ctx, game: BiteFightGame):
             
             game.reset()
             return
-
-
 
         # small pause between rounds
         await asyncio.sleep(2.0)
