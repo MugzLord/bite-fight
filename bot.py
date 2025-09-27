@@ -820,7 +820,6 @@ async def run_game(ctx, game: BiteFightGame):
                 )
                 embed.add_field(name="Events", value="\n".join(events)[:1024], inline=False)
 
-
         # pretty life bars for ALL players (alive or 0 HP)
         lines_hp = []
         for p in game.players:
