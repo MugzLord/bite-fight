@@ -6,6 +6,7 @@ import asyncio
 import datetime
 from collections import defaultdict
 from io import BytesIO
+from discord import File
 
 import discord
 from discord.ext import commands
@@ -514,17 +515,15 @@ async def bf_start(ctx):
     # NO Status field anymore
     if game.is_tournament:
         embed.add_field(name="Pot", value=f"💰 {game.pot} • Entry {game.entry_fee}", inline=False)
-    
-    # Footer shows host + timer (player count will be appended by the view)
+        # Footer shows host + timer (player count will be appended by the view)
     embed.set_footer(text=f"Host: {ctx.author.display_name} • Lobby closes in 30s")
     
     view = LobbyView(game, host=ctx.author, timeout=30.0)
     game.lobby_view = view
     
-    embed = brand_embed(embed)
-    msg = await ctx.send(embed=embed, view=view, files=files)
+    embed, brand_files = brand_embed(embed)
+    msg = await ctx.send(embed=embed, view=view, files=brand_files)
 
-    view.message = msg
 
 
     async def lobby_timer():
@@ -588,8 +587,8 @@ async def bf_begin(ctx):
         embed.add_field(name="Prize mode", value=s.get("prize_mode", "credits").title(), inline=True)
 
     embed.set_footer(text=f"Host: {ctx.author.display_name}")
-    embed = brand_embed(embed)
-    await ctx.send(embed=embed, files=files)
+    embed, brand_files = brand_embed(embed)
+    await ctx.send(embed=embed, files=brand_files)
 
 
     # run rounds; if anything blows up, show it so it doesn't look "stuck"
@@ -644,12 +643,14 @@ def hp_bar(cur: int, max_hp: int, width: int = 18) -> str:
     return "▰" * filled + "▱" * (width - filled)
 
 def brand_embed(embed: discord.Embed, files_list=None):
-    """Put the Bite & Fight logo as a SMALL THUMBNAIL (top-right) inside the embed."""
+    """Attach the Bite & Fight logo as an embed thumbnail.
+    Returns (embed, files) so the caller can pass files=... when sending.
+    """
     path = find_asset(["logo.png", "logo.jpg", "logo.jpeg"])
     files = list(files_list or [])
     if path:
         files.append(discord.File(path, filename="bf_logo.png"))
-        embed.set_thumbnail(url="attachment://bf_logo.png")  # <-- corner logo
+        embed.set_thumbnail(url="attachment://bf_logo.png")
     return embed, files
 
 
