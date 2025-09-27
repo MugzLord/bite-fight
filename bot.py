@@ -336,7 +336,7 @@ async def build_versus_card(
     from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance
     from io import BytesIO
 
-    W, H = 900, 500
+    W, H = 900, 380
     pad = 32
     face = 360
 
@@ -379,7 +379,7 @@ async def build_versus_card(
     card.alpha_composite(ra, dest=(W - pad - face, pad))
 
     # --- winner/loser ribbons + badges ---
-    rb_h = 120
+    rb_h = 50
     left_rect  = (pad, pad + face - rb_h, pad + face, pad + face)
     right_rect = (W - pad - face, pad + face - rb_h, W - pad, pad + face)
 
@@ -409,8 +409,8 @@ async def build_versus_card(
             if path:
                 try:
                     ic = Image.open(path).convert("RGBA")
-                    max_w_frac = 0.80
-                    overshoot   = 1.80
+                    max_w_frac = 0.65
+                    overshoot   = 1.20
                     scale = min((rw * max_w_frac) / ic.width, (rh * overshoot) / ic.height)
                     ic = ic.resize((max(1, int(ic.width * scale)), max(1, int(ic.height * scale))), Image.LANCZOS)
                     px = x0 + (rw - ic.width) // 2
@@ -446,7 +446,7 @@ async def build_versus_card(
             pass
 
     # --- action text strip ---
-    strip_h = 120
+    strip_h = 80
     strip = Image.new("RGBA", (W - pad * 2, strip_h), (0, 0, 0, 170))
     card.alpha_composite(strip, dest=(pad, H - pad - strip_h))
     draw = ImageDraw.Draw(card)
@@ -654,7 +654,7 @@ def build_hp_panel_image(game) -> BytesIO:
             fw = r * 2
         if fw > 0:
             d.rounded_rectangle((x, y, x + fw, y + h), radius=r, fill=(*fill_rgb, 230))
-        d.rectangle((x, y, x + w, y + h//2), fill=(255, 255, 255, 25))
+        #d.rectangle((x, y, x + w, y + h//2), fill=(255, 255, 255, 25))
 
     for i, p in enumerate(players):
         y = pad + i * row_h
@@ -677,6 +677,10 @@ def build_hp_panel_image(game) -> BytesIO:
 
         label = f"{int(round(pct*100))}%"
         d.text((bar_x + bar_w + 12, bar_y - 2), label, font=f_pct, fill=(255, 255, 255, 255))
+        
+        #bottom crop#
+        crop_bottom = 24  # pixels to remove
+        card = card.crop((0, 0, card.width, card.height - crop_bottom))
 
     buf = BytesIO()
     im.convert("RGB").save(buf, format="PNG", optimize=True)
