@@ -311,31 +311,33 @@ def grey_out(im: Image.Image, dim: float = 0.55) -> Image.Image:
     return g
 
 async def build_versus_card(
+async def build_versus_card(
     attacker: discord.Member,
     target: discord.Member,
     action_text: str,
     grey_left: bool = False,
     grey_right: bool = False,
-    left_hp: int | None = None,     # <-- add
-    right_hp: int | None = None,    # <-- add
-    max_hp: int = 100,              # <-- add
+    left_hp: int | None = None,     # optional: for Catfight sliders
+    right_hp: int | None = None,    # optional: for Catfight sliders
+    max_hp: int = 100,              # optional: for Catfight sliders
 ) -> BytesIO:
     from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance
+    from io import BytesIO
 
     W, H = 900, 500
     pad = 32
     face = 360
 
-    # --- background image base (versus_bg.png)
+    # --- background ---
     from pathlib import Path
     try:
-        bg_path = Path(__file__).with_name("versus_bg.png")  # or Path(__file__).with_name("assets") / "versus_bg.png"
+        bg_path = Path(__file__).with_name("versus_bg.png")
         background = Image.open(bg_path).convert("RGBA").resize((W, H), Image.LANCZOS)
     except Exception:
         background = Image.new("RGBA", (W, H), (24, 24, 24, 255))
-    card = background.copy()  # start from the bg so it shows everywhere
+    card = background.copy()
 
-    # --- avatars
+    # --- avatars ---
     async def _fetch(member, size=512):
         try:
             b = await member.display_avatar.replace(size=size, format="png").read()
@@ -364,33 +366,26 @@ async def build_versus_card(
     card.alpha_composite(la, dest=(pad, pad))
     card.alpha_composite(ra, dest=(W - pad - face, pad))
 
-    # --- winner/loser ribbons + badges (trophy / RIP)
-    rb_h = 120  # ribbon height
+    # --- winner/loser ribbons + badges ---
+    rb_h = 120  # big badge band
     left_rect  = (pad, pad + face - rb_h, pad + face, pad + face)
     right_rect = (W - pad - face, pad + face - rb_h, W - pad, pad + face)
-    
-    # colours
-    WIN  = (70, 130, 180, 255)  # steel-blue
-    LOSE = (200, 60, 60, 255)   # red
-    
-    # decide which side is loser/winner based on grey flags
-    # (greyed side = loser)
-    if grey_left != grey_right:  # only draw when one side is greyed
+
+    WIN  = (70, 130, 180, 255)
+    LOSE = (200, 60, 60, 255)
+
+    if grey_left != grey_right:
         d2 = ImageDraw.Draw(card)
-    
         if grey_left:
-            # left loses, right wins
             d2.rectangle(left_rect,  fill=LOSE)
             d2.rectangle(right_rect, fill=WIN)
             left_badge, right_badge = "rip", "trophy"
         else:
-            # right loses, left wins
             d2.rectangle(left_rect,  fill=WIN)
             d2.rectangle(right_rect, fill=LOSE)
             left_badge, right_badge = "trophy", "rip"
-    
+
         def _paste_badge(kind: str, rect: tuple[int,int,int,int]):
-            # try asset first, else minimal text fallback
             name_map = {
                 "trophy": ["trophy.png", "cup.png", "trophy_emoji.png"],
                 "rip":    ["rip.png", "tombstone.png", "grave.png", "rip_emoji.png"],
@@ -401,31 +396,28 @@ async def build_versus_card(
             if path:
                 try:
                     ic = Image.open(path).convert("RGBA")
-                    scale = min((rw - 8) / ic.width, (rh - 8) / ic.height)  # fill the band
+                    scale = min((rw - 8) / ic.width, (rh - 8) / ic.height)  # nearly fill band
                     ic = ic.resize((max(1, int(ic.width * scale)), max(1, int(ic.height * scale))), Image.LANCZOS)
                     px = x0 + (rw - ic.width) // 2
                     py = y0 + (rh - ic.height) // 2 - 6
-                    card.alpha_composite(ic, dest=(px, py)) # fill the band
+                    card.alpha_composite(ic, dest=(px, py))
                     return
                 except Exception:
                     pass
-            # fallback: simple label
             try:
                 f = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 64)
             except Exception:
                 f = ImageFont.load_default()
             label = "RIP" if kind == "rip" else "WIN"
-            tw = int(f.getlength(label))
-            th = f.getbbox(label)[3]
+            tw = int(f.getlength(label)); th = f.getbbox(label)[3]
             px = x0 + (rw - tw) // 2
             py = y0 + (rh - th) // 2 - 2
-            d2.text((px, py), label, font=f, fill=(255, 255, 255, 255))
-    
+            ImageDraw.Draw(card).text((px, py), label, font=f, fill=(255, 255, 255, 255))
+
         _paste_badge(left_badge,  left_rect)
         _paste_badge(right_badge, right_rect)
-    # --- end winner/loser ribbons
 
-    # --- crossed swords (center)
+    # --- swords overlay (center) ---
     swords_path = find_asset(["swords.png", "sword.png", "crossed_swords.png"])
     if swords_path:
         try:
@@ -433,116 +425,100 @@ async def build_versus_card(
             sw = int(W * 0.35)
             sh = int(swords.height * (sw / swords.width))
             swords = swords.resize((sw, sh), Image.LANCZOS)
-            sx = (W - sw) // 2
-            sy = int(H * 0.18)
-            card.alpha_composite(swords, dest=(sx, sy))
-        except Exception as e:
-            print(f"[Bite&Fight] swords overlay failed: {e}")
+            card.alpha_composite(swords, dest=((W - sw) // 2, int(H * 0.18)))
+        except Exception:
+            pass
 
-    # --- logo watermark (top-right, semi-transparent)
-    logo_path = find_asset(["logo.png", "logo.jpg", "logo.jpeg"])
-    if logo_path:
-        try:
-            logo = Image.open(logo_path).convert("RGBA")
-            maxw = int(W * 0.18)                  # ~18% of card width
-            scale = min(maxw / logo.width, 1.0)
-            lw, lh = int(logo.width * scale), int(logo.height * scale)
-            logo = logo.resize((lw, lh), Image.LANCZOS)
-
-            # soften opacity
-            *rgb, a = logo.split()
-            a = a.point(lambda p: int(p * 0.80))
-            logo.putalpha(a)
-
-            card.alpha_composite(logo, dest=(W - lw - 16, 16))
-        except Exception as e:
-            print(f"[Bite&Fight] logo overlay failed: {e}")
-
-    # --- action text strip
-    strip_h = 92
+    # --- action text strip (bigger, auto-fit, outlined) ---
+    strip_h = 120
     strip = Image.new("RGBA", (W - pad * 2, strip_h), (0, 0, 0, 170))
     card.alpha_composite(strip, dest=(pad, H - pad - strip_h))
     draw = ImageDraw.Draw(card)
-    try:
-        fnt = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 32)
-    except Exception:
-        fnt = ImageFont.load_default()
 
     text = action_text.strip()
     max_px = W - pad * 2 - 30
-    while fnt.getlength(text) > max_px and len(text) > 8:
-        text = text[:-4] + "..."
+    font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    size = 48
+    while size >= 26:
+        try:
+            fnt = ImageFont.truetype(font_path, size)
+        except Exception:
+            fnt = ImageFont.load_default()
+            break
+        if fnt.getlength(text) <= max_px:
+            break
+        size -= 2
 
     tx = pad + 16
     ty = H - pad - strip_h + (strip_h - fnt.getbbox(text)[3]) // 2 - 6
-    draw.text((tx, ty), text, font=fnt, fill=(255, 255, 255, 255))
+    draw.text(
+        (tx, ty),
+        text,
+        font=fnt,
+        fill=(255, 255, 255, 255),
+        stroke_width=3,
+        stroke_fill=(0, 0, 0, 180),
+    )
 
-    # --- Catfight-style HP sliders (optional) ---
-if left_hp is not None and right_hp is not None and max_hp:
-    def _draw_slider(x, y, w, h, pct, fill_rgb):
-        pct = max(0.0, min(1.0, float(pct)))
-        r = h // 2
+    # --- Catfight-style HP sliders (under each avatar, optional) ---
+    if left_hp is not None and right_hp is not None and max_hp:
+        def _draw_slider(x, y, w, h, pct, fill_rgb):
+            pct = max(0.0, min(1.0, float(pct)))
+            r = h // 2
 
-        # track (soft grey)
-        track = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        d = ImageDraw.Draw(track)
-        d.rounded_rectangle((0, 0, w, h), radius=r, fill=(180, 180, 180, 160))
-        card.alpha_composite(track, dest=(x, y))
+            # track
+            track = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            d = ImageDraw.Draw(track)
+            d.rounded_rectangle((0, 0, w, h), radius=r, fill=(180, 180, 180, 160))
+            card.alpha_composite(track, dest=(x, y))
 
-        # fill (keep rounded ends visible for tiny values)
-        fw = int(w * pct)
-        if 0 < fw < r * 2:
-            fw = r * 2
-        if fw > 0:
-            fill = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-            df = ImageDraw.Draw(fill)
-            df.rounded_rectangle((0, 0, fw, h), radius=r, fill=(*fill_rgb, 230))
-            card.alpha_composite(fill, dest=(x, y))
+            # fill (keep rounded ends at tiny values)
+            fw = int(w * pct)
+            if 0 < fw < r * 2:
+                fw = r * 2
+            if fw > 0:
+                fill = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+                df = ImageDraw.Draw(fill)
+                df.rounded_rectangle((0, 0, fw, h), radius=r, fill=(*fill_rgb, 230))
+                card.alpha_composite(fill, dest=(x, y))
 
-        # subtle highlight
-        hi = Image.new("RGBA", (w, h // 2), (255, 255, 255, 30))
-        card.alpha_composite(hi, dest=(x, y))
+            # highlight
+            hi = Image.new("RGBA", (w, h // 2), (255, 255, 255, 30))
+            card.alpha_composite(hi, dest=(x, y))
 
-    # positions (under avatars, above the action strip)
-    bar_h = 24
-    gap_y = 12
-    y0 = H - pad - strip_h - gap_y - bar_h  # uses your existing strip_h/pad
+        bar_h = 24
+        gap_y = 12
+        y0 = H - pad - strip_h - gap_y - bar_h  # above action strip
 
-    # widths under each face
-    left_x  = pad
-    right_x = W - pad - face
-    bar_w   = face
+        left_x  = pad
+        right_x = W - pad - face
+        bar_w   = face
 
-    # colours (Catfight-like)
-    green = (46, 204, 113)   # left bar
-    pink  = (236, 64, 122)   # right bar
+        green = (46, 204, 113)
+        pink  = (236, 64, 122)
 
-    # percentages
-    lp = (left_hp / max_hp) if max_hp else 0.0
-    rp = (right_hp / max_hp) if max_hp else 0.0
+        lp = (left_hp / max_hp) if max_hp else 0.0
+        rp = (right_hp / max_hp) if max_hp else 0.0
 
-    # draw bars
-    _draw_slider(left_x,  y0, bar_w, bar_h, lp, green)
-    _draw_slider(right_x, y0, bar_w, bar_h, rp, pink)
+        _draw_slider(left_x,  y0, bar_w, bar_h, lp, green)
+        _draw_slider(right_x, y0, bar_w, bar_h, rp, pink)
 
-    # percent labels (white, to the right of each bar)
-    try:
-        pf = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
-    except Exception:
-        pf = ImageFont.load_default()
-    lw = f"{int(round(lp*100))}%"
-    rw = f"{int(round(rp*100))}%"
-    draw = ImageDraw.Draw(card)
-    th = pf.getbbox(lw)[3]
-    draw.text((left_x  + bar_w + 10, y0 + (bar_h - th)//2 - 2), lw, font=pf, fill=(255,255,255,255))
-    draw.text((right_x + bar_w + 10, y0 + (bar_h - th)//2 - 2), rw, font=pf, fill=(255,255,255,255))
-# --- end sliders ---
-buf = BytesIO()
-card.convert("RGB").save(buf, format="PNG", optimize=True)
-buf.seek(0)
-return buf
+        try:
+            pf = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
+        except Exception:
+            pf = ImageFont.load_default()
+        lw = f"{int(round(lp*100))}%"
+        rw = f"{int(round(rp*100))}%"
+        th = pf.getbbox(lw)[3]
+        draw.text((left_x  + bar_w + 10, y0 + (bar_h - th)//2 - 2), lw, font=pf, fill=(255,255,255,255))
+        th = pf.getbbox(rw)[3]
+        draw.text((right_x + bar_w + 10, y0 + (bar_h - th)//2 - 2), rw, font=pf, fill=(255,255,255,255))
+    # --- end sliders ---
 
-    
+    buf = BytesIO()
+    card.convert("RGB").save(buf, format="PNG", optimize=True)
+    buf.seek(0)
+    return buf
 
 
 # =========================
@@ -862,8 +838,12 @@ async def run_game(ctx, game: BiteFightGame):
 
                 img_bytes = await build_versus_card(
                     left, right, key_play,
-                    grey_left=fade_left, grey_right=fade_right
+                    grey_left=fade_left, grey_right=fade_right,
+                    left_hp=game.hp.get(left.id, 0),
+                    right_hp=game.hp.get(right.id, 0),
+                    max_hp=game.max_hp,
                 )
+
                 file = discord.File(img_bytes, filename=f"round_{game.round_num}.png")
             except Exception:
                 file = None  # never crash a round just for the art
