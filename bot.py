@@ -361,7 +361,7 @@ async def build_versus_card(
     card.alpha_composite(ra, dest=(W - pad - face, pad))
 
     # --- winner/loser ribbons + badges ---
-    rb_h = 120
+    rb_h = 85
     left_rect  = (pad, pad + face - rb_h, pad + face, pad + face)
     right_rect = (W - pad - face, pad + face - rb_h, W - pad, pad + face)
 
@@ -403,7 +403,7 @@ async def build_versus_card(
                     pass
 
             try:
-                f = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 64)
+                f = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 54)
             except Exception:
                 f = ImageFont.load_default()
             label = "RIP" if kind == "rip" else "WIN"
@@ -466,23 +466,16 @@ async def build_versus_card(
         card = new_card
         H = H + footer_h
 
-        def _draw_slider(x, y, w, h, pct, fill_rgb):
+        def draw_slider(x, y, w, h, pct, fill_rgb):
             pct = max(0.0, min(1.0, float(pct)))
             r = h // 2
-            track = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-            d = ImageDraw.Draw(track)
-            d.rounded_rectangle((0, 0, w, h), radius=r, fill=(180, 180, 180, 160))
-            card.alpha_composite(track, dest=(x, y))
+            d.rounded_rectangle((x, y, x + w, y + h), radius=r, fill=(180, 180, 180, 160))
             fw = int(w * pct)
             if 0 < fw < r * 2:
                 fw = r * 2
             if fw > 0:
-                fill = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-                df = ImageDraw.Draw(fill)
-                df.rounded_rectangle((0, 0, fw, h), radius=r, fill=(*fill_rgb, 230))
-                card.alpha_composite(fill, dest=(x, y))
-            hi = Image.new("RGBA", (w, h // 2), (255, 255, 255, 30))
-            card.alpha_composite(hi, dest=(x, y))
+                d.rounded_rectangle((x, y, x + fw, y + h), radius=r, fill=(*fill_rgb, 230))
+            # (no highlight)
 
         bar_h = 22
         left_x  = pad
