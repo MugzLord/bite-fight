@@ -694,120 +694,112 @@ def brand_embed(embed: discord.Embed, files_list=None):
     return embed, files
 
 def build_hp_panel_image(game) -> BytesIO:
-    """Small image that shows a Catfight-style HP bar for each player."""
     from PIL import Image, ImageDraw, ImageFont
     from io import BytesIO
+    import os, PIL
 
     players = list(game.players)
     n = max(1, len(players))
+
+    # Wider canvas so Discord’s downscale doesn’t crush text
     W = 1400
-    row_h = 52
-    pad = 12
-    name_w = 360
+    row_h = 56
+    pad = 20
     bar_h = 14
-    H = pad * 2 + n * row_h
 
-    im = Image.new("RGBA", (W, H), (24, 24, 24, 255))
-    d = ImageDraw.Draw(im)
-
-    #microscopic fonts
-    #try: 
-        #f_name = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 30)  # CHANGED
-        #f_pct  = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 26)  # CHANGED
-    #except Exception:
-        #f_name = f_pct = ImageFont.load_default()
-
-    # try to load a real TTF from your repo first
-    # ---- fonts (force a real TTF; never use tiny bitmap fallback) ----
     # ---- fonts (force a real TTF; avoid tiny bitmap fallback) ----
-    import os, PIL
     pil_ttf = os.path.join(os.path.dirname(PIL.__file__), "fonts", "DejaVuSans-Bold.ttf")
-    
-    # try assets first, then Pillow's packaged font, then system path
     font_path = (
         find_asset(["DejaVuSans-Bold.ttf", "arialbd.ttf", "Arial Bold.ttf"])
         or (pil_ttf if os.path.exists(pil_ttf) else None)
         or "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
     )
-    
     try:
-        f_name = ImageFont.truetype(font_path, 36)   # names (left)
-        f_pct  = ImageFont.truetype(font_path, 32)   # percent (right)
+        f_name = ImageFont.truetype(font_path, 36)   # left names
+        f_pct  = ImageFont.truetype(font_path, 32)   # right %
     except Exception:
         f_name = f_pct = ImageFont.load_default()
-    
-    # print("[BF] HP panel font:", font_path)  # optional debug
-    
 
+    # Dynamic name column width so long names don’t crowd the bar
+    max_name_px = 0
+    for p in players:
+        try:
+            max_name_px = max(max_name_px, int(f_name.getlength(p.display_name)))
+        except Exception:
+            max_name_px = max(max_name_px, len(p.display_name) * 20)
+    name_w = min(max(360, max_name_px + 24), 520)
 
-
+    H = pad * 2 + n * row_h
+    im = Image.new("RGBA", (W, H), (24, 24, 24, 255))
+    d = ImageDraw.Draw(im)
 
     def draw_slider(x, y, w, h, pct, fill_rgb):
         pct = max(0.0, min(1.0, float(pct)))
         r = h // 2
         # track
-        d.rounded_rectangle((x, y, x + w, y + h), radius=r, fill=(180, 180, 180, 130)) #old 160
-        # fill (keep rounded ends for tiny values)
+        d.rounded_rectangle((x, y, x + w, y + h), radius=r, fill=(180, 180, 180, 160))
+        # fill
         fw = int(w * pct)
         if 0 < fw < r * 2:
             fw = r * 2
         if fw > 0:
             d.rounded_rectangle((x, y, x + fw, y + h), radius=r, fill=(*fill_rgb, 230))
-        # highlight
-        #d.rectangle((x, y, x + w, y + h//2), fill=(255, 255, 255, 25))
 
     for i, p in enumerate(players):
         y = pad + i * row_h
         hp = game.hp.get(p.id, 0)
         pct = hp / game.max_hp if game.max_hp else 0.0
 
-        # name
-        #d.text((pad, y + (row_h - 22)//2), p.display_name, font=f_name, fill=(255, 255, 255, 255))
-        # new
-        name_h = f_name.getbbox(p.display_name)[3]
+        # name (bold + stroke, vertically centered)
+        try:
+            name_h = f_name.getbbox(p.display_name)[3]
+        except Exception:
+            name_h = 32
         name_y = y + (row_h - name_h) // 2
         d.text(
             (pad, name_y),
             p.display_name,
             font=f_name,
             fill=(255, 255, 255, 255),
-            stroke_width=2,
+            stroke_width=3,
             stroke_fill=(0, 0, 0, 180),
         )
 
-
-        # colour by HP (green / yellow / red)
-        if pct >= 2/3:
+        # colour by HP
+        if pct >= 2 / 3:
             col = (46, 204, 113)
-        elif pct >= 1/3:
+        elif pct >= 1 / 3:
             col = (241, 196, 15)
         else:
             col = (231, 76, 60)
 
         # slider
         bar_x = pad + name_w
-        bar_w = W - pad - bar_x - 60
-        bar_y = y + (row_h - bar_h)//2
+        bar_w = W - pad - bar_x - 80
+        bar_y = y + (row_h - bar_h) // 2
         draw_slider(bar_x, bar_y, bar_w, bar_h, pct, col)
 
-        # % label
-        label = f"{int(round(pct*100))}%"
-        #d.text((bar_x + bar_w + 12, bar_y - 2), label, font=f_pct, fill=(255, 255, 255, 255))
-        # new
+        # % label (bold + stroke, vertically centered to bar)
+        label = f"{int(round(pct * 100))}%"
+        try:
+            pct_h = f_pct.getbbox(label)[3]
+        except Exception:
+            pct_h = 28
+        pct_y = bar_y + (bar_h - pct_h) // 2
         d.text(
-            (bar_x + bar_w + 12, bar_y - 2),
+            (bar_x + bar_w + 12, pct_y),
             label,
             font=f_pct,
             fill=(255, 255, 255, 255),
-            stroke_width=2,
+            stroke_width=3,
             stroke_fill=(0, 0, 0, 160),
         )
-
 
     buf = BytesIO()
     im.convert("RGB").save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return buf
+
 
 
 #--commands--#
