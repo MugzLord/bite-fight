@@ -701,7 +701,7 @@ def build_hp_panel_image(game) -> BytesIO:
     players = list(game.players)
     n = max(1, len(players))
     W = 900
-    row_h = 44
+    row_h = 40
     pad = 12
     name_w = 280
     bar_h = 12
@@ -710,11 +710,27 @@ def build_hp_panel_image(game) -> BytesIO:
     im = Image.new("RGBA", (W, H), (24, 24, 24, 255))
     d = ImageDraw.Draw(im)
 
+    #microscopic fonts
+    #try: 
+        #f_name = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 30)  # CHANGED
+        #f_pct  = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 26)  # CHANGED
+    #except Exception:
+        #f_name = f_pct = ImageFont.load_default()
+
+    # try to load a real TTF from your repo first
+    font_path = find_asset([
+        "DejaVuSans-Bold.ttf",     # put this file in /assets
+        "arialbd.ttf",
+        "Arial Bold.ttf"
+    ]) or "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    
     try:
-        f_name = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 30)  # CHANGED
-        f_pct  = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 26)  # CHANGED
+        f_name = ImageFont.truetype(font_path, 30)  # bigger, bold
+        f_pct  = ImageFont.truetype(font_path, 26)
     except Exception:
+        # last resort — tiny bitmap font (avoid if possible)
         f_name = f_pct = ImageFont.load_default()
+
 
 
     def draw_slider(x, y, w, h, pct, fill_rgb):
