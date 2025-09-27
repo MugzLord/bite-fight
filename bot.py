@@ -701,18 +701,18 @@ def build_hp_panel_image(game) -> BytesIO:
     players = list(game.players)
     n = max(1, len(players))
 
-    # --- Catfight-ish, sized for Discord column (no downscale) ---
-    W = 420           # <= key: prevents Discord shrinking
-    row_h = 60
+    # Catfight-style layout: wide card, thick bars, extra room for labels
+    W = 420          # long bars like Catfight
+    row_h = 60       # more vertical space so text isn't cramped
     pad = 18
-    name_w = 160      # left label column
-    bar_h = 16
+    name_w = 160     # left name column
+    bar_h = 16       # thick pill bar
     H = pad * 2 + n * row_h
 
     im = Image.new("RGBA", (W, H), (24, 24, 24, 255))
     d = ImageDraw.Draw(im)
 
-    # ---- guaranteed bold TTF (never tiny bitmap) ----
+    # ---- Fonts (guaranteed TTF so we never fall back to tiny bitmap) ----
     pil_ttf = os.path.join(os.path.dirname(PIL.__file__), "fonts", "DejaVuSans-Bold.ttf")
     font_path = (
         find_asset(["DejaVuSans-Bold.ttf", "arialbd.ttf", "Arial Bold.ttf"])
@@ -721,16 +721,31 @@ def build_hp_panel_image(game) -> BytesIO:
     )
     try:
         f_name = ImageFont.truetype(font_path, 28)   # left names
-        f_pct  = ImageFont.truetype(font_path, 24)   # right %
+        f_pct  = ImageFont.truetype(font_path, 24)   # percent pill text
     except Exception:
         f_name = f_pct = ImageFont.load_default()
 
+    def text_h(font, s):
+        try:
+            return font.getbbox(s)[3]
+        except Exception:
+            return int(font.size * 0.8)
+
+    def text_w(font, s):
+        try:
+            return int(font.getlength(s))
+        except Exception:
+            return len(s) * max(10, font.size // 2)
+
+    # --- Catfight bar renderer (no glossy white strip) ---
     def draw_bar(x, y, w, h, pct, fill_rgb):
         pct = max(0.0, min(1.0, float(pct)))
         r = h // 2
-        # track
+
+        # track (light grey, full width)
         d.rounded_rectangle((x, y, x + w, y + h), radius=r, fill=(200, 200, 200, 230))
-        # fill
+
+        # fill (solid color)
         fw = int(w * pct)
         if 0 < fw < r * 2:
             fw = r * 2
@@ -742,8 +757,8 @@ def build_hp_panel_image(game) -> BytesIO:
         hp = game.hp.get(p.id, 0)
         pct = (hp / game.max_hp) if game.max_hp else 0.0
 
-        # name (bold + stroke, vertically centered)
-        name_h = f_name.getbbox(p.display_name)[3]
+        # Left name — bold with stroke, vertically centered
+        name_h = text_h(f_name, p.display_name)
         name_y = y + (row_h - name_h) // 2
         d.text(
             (pad, name_y),
@@ -754,7 +769,7 @@ def build_hp_panel_image(game) -> BytesIO:
             stroke_fill=(0, 0, 0, 180),
         )
 
-        # colour by HP
+        # Color by HP (Catfight green / amber / red vibe)
         if pct >= 2/3:
             col = (88, 214, 141)      # green
         elif pct >= 1/3:
@@ -762,30 +777,33 @@ def build_hp_panel_image(game) -> BytesIO:
         else:
             col = (231, 76, 60)       # red
 
-        # bar
+        # Bar
         bar_x = pad + name_w
-        bar_w = W - pad - bar_x - 44   # leaves room for % on the right
+        bar_w = W - pad - bar_x - 80   # leave room for the % pill on the right
         bar_y = y + (row_h - bar_h) // 2
         draw_bar(bar_x, bar_y, bar_w, bar_h, pct, col)
 
-        # % label (bold + stroke, centered to bar height)
+        # Percent "pill" UNDER the right end of the bar (like Catfight)
         label = f"{int(round(pct * 100))}%"
-        pct_h = f_pct.getbbox(label)[3]
-        pct_y = bar_y + (bar_h - pct_h) // 2
-        d.text(
-            (bar_x + bar_w + 12, pct_y),
-            label,
-            font=f_pct,
-            fill=(255, 255, 255, 255),
-            stroke_width=2,
-            stroke_fill=(0, 0, 0, 160),
+        pill_h = 22
+        pill_w = max(40, text_w(f_pct, label) + 16)
+        pill_x = bar_x + bar_w - pill_w
+        pill_y = bar_y + bar_h + 6
+        d.rounded_rectangle(
+            (pill_x, pill_y, pill_x + pill_w, pill_y + pill_h),
+            radius=pill_h // 2,
+            fill=(60, 60, 60, 230)
         )
+        # Center the label inside the pill
+        lh = text_h(f_pct, label)
+        ly = pill_y + (pill_h - lh) // 2
+        lx = pill_x + (pill_w - text_w(f_pct, label)) // 2
+        d.text((lx, ly), label, font=f_pct, fill=(255, 255, 255, 255))
 
     buf = BytesIO()
     im.convert("RGB").save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return buf
-
 
 #--commands--#
 @bot.command(name="bf_stop")
@@ -1078,7 +1096,7 @@ async def run_game(ctx, game: BiteFightGame):
             return
 
         # small pause between rounds
-        await asyncio.sleep(2.0)
+        await asyncio.sleep(3.0)
 
 
 # =========================
