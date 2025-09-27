@@ -701,20 +701,21 @@ def build_hp_panel_image(game) -> BytesIO:
     players = list(game.players)
     n = max(1, len(players))
     W = 900
-    row_h = 32
+    row_h = 44
     pad = 12
-    name_w = 220
-    bar_h = 20
+    name_w = 280
+    bar_h = 12
     H = pad * 2 + n * row_h
 
     im = Image.new("RGBA", (W, H), (24, 24, 24, 255))
     d = ImageDraw.Draw(im)
 
     try:
-        f_name = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 22)
-        f_pct  = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
+        f_name = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 30)  # CHANGED
+        f_pct  = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 26)  # CHANGED
     except Exception:
         f_name = f_pct = ImageFont.load_default()
+
 
     def draw_slider(x, y, w, h, pct, fill_rgb):
         pct = max(0.0, min(1.0, float(pct)))
