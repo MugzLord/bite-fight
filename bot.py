@@ -728,7 +728,7 @@ def build_hp_panel_image(game) -> BytesIO:
         if fw > 0:
             d.rounded_rectangle((x, y, x + fw, y + h), radius=r, fill=(*fill_rgb, 230))
         # highlight
-        d.rectangle((x, y, x + w, y + h//2), fill=(255, 255, 255, 25))
+        #d.rectangle((x, y, x + w, y + h//2), fill=(255, 255, 255, 25))
 
     for i, p in enumerate(players):
         y = pad + i * row_h
