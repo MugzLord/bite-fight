@@ -460,19 +460,26 @@ async def build_versus_card(
         stroke_fill=(0, 0, 0, 180),
     )
 
-    # --- Catfight-style HP sliders (under each avatar, optional) ---
+    # --- Catfight-style HP sliders (optional, drawn in a bottom footer) ---
     if left_hp is not None and right_hp is not None and max_hp:
+        # extend canvas with a dedicated footer area so nothing overlaps
+        footer_h = 64
+        new_card = Image.new("RGBA", (W, H + footer_h), (24, 24, 24, 255))  # dark footer
+        new_card.alpha_composite(card, dest=(0, 0))
+        card = new_card
+        H = H + footer_h  # update height for following math
+    
         def _draw_slider(x, y, w, h, pct, fill_rgb):
             pct = max(0.0, min(1.0, float(pct)))
             r = h // 2
-
-            # track
+    
+            # track (soft grey)
             track = Image.new("RGBA", (w, h), (0, 0, 0, 0))
             d = ImageDraw.Draw(track)
             d.rounded_rectangle((0, 0, w, h), radius=r, fill=(180, 180, 180, 160))
             card.alpha_composite(track, dest=(x, y))
-
-            # fill (keep rounded ends at tiny values)
+    
+            # fill (keep rounded ends visible for tiny values)
             fw = int(w * pct)
             if 0 < fw < r * 2:
                 fw = r * 2
@@ -481,32 +488,36 @@ async def build_versus_card(
                 df = ImageDraw.Draw(fill)
                 df.rounded_rectangle((0, 0, fw, h), radius=r, fill=(*fill_rgb, 230))
                 card.alpha_composite(fill, dest=(x, y))
-
-            # highlight
+    
+            # subtle highlight
             hi = Image.new("RGBA", (w, h // 2), (255, 255, 255, 30))
             card.alpha_composite(hi, dest=(x, y))
-
-        bar_h = 24
-        gap_y = 12
-        y0 = H - pad - strip_h - gap_y - bar_h  # above action strip
-
+    
+        # bar geometry (in the footer, vertically centered)
+        bar_h = 22
         left_x  = pad
         right_x = W - pad - face
         bar_w   = face
-
-        green = (46, 204, 113)
-        pink  = (236, 64, 122)
-
+        y0 = H - footer_h + (footer_h - bar_h) // 2  # centered in footer
+    
+        # colours (Catfight-like)
+        green = (46, 204, 113)   # left
+        pink  = (236, 64, 122)   # right
+    
+        # percentages
         lp = (left_hp / max_hp) if max_hp else 0.0
         rp = (right_hp / max_hp) if max_hp else 0.0
-
+    
+        # draw bars
         _draw_slider(left_x,  y0, bar_w, bar_h, lp, green)
         _draw_slider(right_x, y0, bar_w, bar_h, rp, pink)
-
+    
+        # percent labels (white, to the right of each bar)
         try:
             pf = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
         except Exception:
             pf = ImageFont.load_default()
+        draw = ImageDraw.Draw(card)
         lw = f"{int(round(lp*100))}%"
         rw = f"{int(round(rp*100))}%"
         th = pf.getbbox(lw)[3]
@@ -514,6 +525,7 @@ async def build_versus_card(
         th = pf.getbbox(rw)[3]
         draw.text((right_x + bar_w + 10, y0 + (bar_h - th)//2 - 2), rw, font=pf, fill=(255,255,255,255))
     # --- end sliders ---
+
 
     buf = BytesIO()
     card.convert("RGB").save(buf, format="PNG", optimize=True)
