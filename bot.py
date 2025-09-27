@@ -310,7 +310,7 @@ def grey_out(im: Image.Image, dim: float = 0.55) -> Image.Image:
     g = ImageEnhance.Brightness(g).enhance(dim)
     return g
 
-async def build_versus_card(
+
 async def build_versus_card(
     attacker: discord.Member,
     target: discord.Member,
