@@ -537,12 +537,12 @@ if left_hp is not None and right_hp is not None and max_hp:
     draw.text((left_x  + bar_w + 10, y0 + (bar_h - th)//2 - 2), lw, font=pf, fill=(255,255,255,255))
     draw.text((right_x + bar_w + 10, y0 + (bar_h - th)//2 - 2), rw, font=pf, fill=(255,255,255,255))
 # --- end sliders ---
+buf = BytesIO()
+card.convert("RGB").save(buf, format="PNG", optimize=True)
+buf.seek(0)
+return buf
 
-
-    buf = BytesIO()
-    card.convert("RGB").save(buf, format="PNG", optimize=True)
-    buf.seek(0)
-    return buf
+    
 
 
 # =========================
