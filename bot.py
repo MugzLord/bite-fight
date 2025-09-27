@@ -701,14 +701,18 @@ def build_hp_panel_image(game) -> BytesIO:
     players = list(game.players)
     n = max(1, len(players))
 
-    # Wider canvas so Discord’s downscale doesn’t crush text
-    W = 560
-    row_h = 54
+    # Catfight-style layout: wide card, thick bars, extra room for labels
+    W = 980          # long bars like Catfight
+    row_h = 64       # more vertical space so text isn't cramped
     pad = 20
-    bar_h = 14
-    name_w = 350   # <— reserve space for the left names
+    name_w = 260     # left name column
+    bar_h = 18       # thick pill bar
+    H = pad * 2 + n * row_h
 
-    # ---- fonts (force a real TTF; avoid tiny bitmap fallback) ----
+    im = Image.new("RGBA", (W, H), (24, 24, 24, 255))
+    d = ImageDraw.Draw(im)
+
+    # ---- Fonts (guaranteed TTF so we never fall back to tiny bitmap) ----
     pil_ttf = os.path.join(os.path.dirname(PIL.__file__), "fonts", "DejaVuSans-Bold.ttf")
     font_path = (
         find_asset(["DejaVuSans-Bold.ttf", "arialbd.ttf", "Arial Bold.ttf"])
@@ -716,90 +720,91 @@ def build_hp_panel_image(game) -> BytesIO:
         or "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
     )
     try:
-        f_name = ImageFont.truetype(font_path, 40)   # left names
-        f_pct  = ImageFont.truetype(font_path, 36)   # right %
+        f_name = ImageFont.truetype(font_path, 28)   # left names
+        f_pct  = ImageFont.truetype(font_path, 22)   # percent pill text
     except Exception:
         f_name = f_pct = ImageFont.load_default()
 
-    # Dynamic name column width so long names don’t crowd the bar
-    max_name_px = 0
-    for p in players:
+    def text_h(font, s):
         try:
-            max_name_px = max(max_name_px, int(f_name.getlength(p.display_name)))
+            return font.getbbox(s)[3]
         except Exception:
-            max_name_px = max(max_name_px, len(p.display_name) * 20)
-    name_w = min(max(360, max_name_px + 24), 520)
+            return int(font.size * 0.8)
 
-    H = pad * 2 + n * row_h
-    im = Image.new("RGBA", (W, H), (24, 24, 24, 255))
-    d = ImageDraw.Draw(im)
+    def text_w(font, s):
+        try:
+            return int(font.getlength(s))
+        except Exception:
+            return len(s) * max(10, font.size // 2)
 
-    def draw_slider(x, y, w, h, pct, fill_rgb):
+    # --- Catfight bar renderer (no glossy white strip) ---
+    def draw_bar(x, y, w, h, pct, fill_rgb):
         pct = max(0.0, min(1.0, float(pct)))
         r = h // 2
-        # track
-        d.rounded_rectangle((x, y, x + w, y + h), radius=r, fill=(180, 180, 180, 160))
-        # fill
+
+        # track (light grey, full width)
+        d.rounded_rectangle((x, y, x + w, y + h), radius=r, fill=(200, 200, 200, 230))
+
+        # fill (solid color)
         fw = int(w * pct)
         if 0 < fw < r * 2:
             fw = r * 2
         if fw > 0:
-            d.rounded_rectangle((x, y, x + fw, y + h), radius=r, fill=(*fill_rgb, 230))
+            d.rounded_rectangle((x, y, x + fw, y + h), radius=r, fill=(*fill_rgb, 255))
 
     for i, p in enumerate(players):
         y = pad + i * row_h
         hp = game.hp.get(p.id, 0)
-        pct = hp / game.max_hp if game.max_hp else 0.0
+        pct = (hp / game.max_hp) if game.max_hp else 0.0
 
-        # name (bold + stroke, vertically centered)
-        try:
-            name_h = f_name.getbbox(p.display_name)[3]
-        except Exception:
-            name_h = 32
+        # Left name — bold with stroke, vertically centered
+        name_h = text_h(f_name, p.display_name)
         name_y = y + (row_h - name_h) // 2
         d.text(
             (pad, name_y),
             p.display_name,
             font=f_name,
             fill=(255, 255, 255, 255),
-            stroke_width=3,
+            stroke_width=2,
             stroke_fill=(0, 0, 0, 180),
         )
 
-        # colour by HP
-        if pct >= 2 / 3:
-            col = (46, 204, 113)
-        elif pct >= 1 / 3:
-            col = (241, 196, 15)
+        # Color by HP (Catfight green / amber / red vibe)
+        if pct >= 2/3:
+            col = (88, 214, 141)      # green
+        elif pct >= 1/3:
+            col = (241, 196, 15)      # amber
         else:
-            col = (231, 76, 60)
+            col = (231, 76, 60)       # red
 
-        # slider
+        # Bar
         bar_x = pad + name_w
-        bar_w = W - pad - bar_x - 60
+        bar_w = W - pad - bar_x - 80   # leave room for the % pill on the right
         bar_y = y + (row_h - bar_h) // 2
-        draw_slider(bar_x, bar_y, bar_w, bar_h, pct, col)
+        draw_bar(bar_x, bar_y, bar_w, bar_h, pct, col)
 
-        # % label (bold + stroke, vertically centered to bar)
+        # Percent "pill" UNDER the right end of the bar (like Catfight)
         label = f"{int(round(pct * 100))}%"
-        try:
-            pct_h = f_pct.getbbox(label)[3]
-        except Exception:
-            pct_h = 28
-        pct_y = bar_y + (bar_h - pct_h) // 2
-        d.text(
-            (bar_x + bar_w + 12, pct_y),
-            label,
-            font=f_pct,
-            fill=(255, 255, 255, 255),
-            stroke_width=3,
-            stroke_fill=(0, 0, 0, 160),
+        pill_h = 22
+        pill_w = max(40, text_w(f_pct, label) + 16)
+        pill_x = bar_x + bar_w - pill_w
+        pill_y = bar_y + bar_h + 6
+        d.rounded_rectangle(
+            (pill_x, pill_y, pill_x + pill_w, pill_y + pill_h),
+            radius=pill_h // 2,
+            fill=(60, 60, 60, 230)
         )
+        # Center the label inside the pill
+        lh = text_h(f_pct, label)
+        ly = pill_y + (pill_h - lh) // 2
+        lx = pill_x + (pill_w - text_w(f_pct, label)) // 2
+        d.text((lx, ly), label, font=f_pct, fill=(255, 255, 255, 255))
 
     buf = BytesIO()
     im.convert("RGB").save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return buf
+
 
 
 
