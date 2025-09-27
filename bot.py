@@ -821,17 +821,6 @@ async def run_game(ctx, game: BiteFightGame):
                 embed.add_field(name="Events", value="\n".join(events)[:1024], inline=False)
 
 
-                # -------- post the round (single embed per round) --------
-                embed = discord.Embed(
-                    title=f"Bite & Fight — Round {game.round_num}",
-                    description=line("round_intro", game.banter) or "",
-                    color=discord.Color.dark_red(),
-                    timestamp=datetime.datetime.utcnow()
-                )
-                embed.add_field(name="Events", value="\n".join(events)[:1024], inline=False)
-
-
-     
         # pretty life bars for ALL players (alive or 0 HP)
         lines_hp = []
         for p in game.players:
