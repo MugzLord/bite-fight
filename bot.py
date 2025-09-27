@@ -49,7 +49,7 @@ def find_asset(candidates: list[str]) -> str | None:
                 return p
     return None
 
-# =========================
+# ==========================
 # Small JSON helpers
 # =========================
 def _json_load(path, default):
