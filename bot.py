@@ -685,19 +685,6 @@ async def build_profile_card(member: discord.Member) -> BytesIO:
     out.seek(0)
     return out
 
-def hp_bar(cur: int, max_hp: int, width: int = 24) -> str:
-    cur = max(0, min(cur, max_hp))
-    pct = (cur / max_hp) if max_hp else 0.0
-    filled = int(round(width * pct))
-
-    # color-coded fill (same thresholds you wanted)
-    fill = "🟩" if pct >= 2/3 else ("🟨" if pct >= 1/3 else "🟥")
-    empty = "⬛"
-
-    # slim-ish look using caps + emoji blocks
-    return f"▏{fill * filled}{empty * (width - filled)}▕"
-
-
 def brand_embed(embed: discord.Embed, files_list=None):
     """Attach the Bite & Fight logo as an embed thumbnail.
     Returns (embed, files) so the caller can pass files=... when sending.
@@ -708,6 +695,79 @@ def brand_embed(embed: discord.Embed, files_list=None):
         files.append(discord.File(path, filename="bf_logo.png"))
         embed.set_thumbnail(url="attachment://bf_logo.png")
     return embed, files
+
+def build_hp_panel_image(game) -> BytesIO:
+    """Small image that shows a Catfight-style HP bar for each player."""
+    from PIL import Image, ImageDraw, ImageFont
+    from io import BytesIO
+
+    players = list(game.players)
+    n = max(1, len(players))
+    W = 900
+    row_h = 40
+    pad = 20
+    name_w = 220
+    bar_h = 20
+    H = pad * 2 + n * row_h
+
+    im = Image.new("RGBA", (W, H), (24, 24, 24, 255))
+    d = ImageDraw.Draw(im)
+
+    try:
+        f_name = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
+        f_pct  = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
+    except Exception:
+        f_name = f_pct = ImageFont.load_default()
+
+    def draw_slider(x, y, w, h, pct, fill_rgb):
+        pct = max(0.0, min(1.0, float(pct)))
+        r = h // 2
+        # track
+        d.rounded_rectangle((x, y, x + w, y + h), radius=r, fill=(180, 180, 180, 160))
+        # fill (keep rounded ends for tiny values)
+        fw = int(w * pct)
+        if 0 < fw < r * 2:
+            fw = r * 2
+        if fw > 0:
+            d.rounded_rectangle((x, y, x + fw, y + h), radius=r, fill=(*fill_rgb, 230))
+        # highlight
+        d.rectangle((x, y, x + w, y + h//2), fill=(255, 255, 255, 25))
+
+    for i, p in enumerate(players):
+        y = pad + i * row_h
+        hp = game.hp.get(p.id, 0)
+        pct = hp / game.max_hp if game.max_hp else 0.0
+
+        # name
+        d.text((pad, y + (row_h - 22)//2), p.display_name, font=f_name, fill=(255, 255, 255, 255))
+
+        # colour by HP (green / yellow / red)
+        if pct >= 2/3:
+            col = (46, 204, 113)
+        elif pct >= 1/3:
+            col = (241, 196, 15)
+        else:
+            col = (231, 76, 60)
+
+        # slider
+        bar_x = pad + name_w
+        bar_w = W - pad - bar_x - 60
+        bar_y = y + (row_h - bar_h)//2
+        draw_slider(bar_x, bar_y, bar_w, bar_h, pct, col)
+
+        # color-coded fill (same thresholds you wanted)
+        fill = "🟩" if pct >= 2/3 else ("🟨" if pct >= 1/3 else "🟥")
+        empty = "⬛"
+
+        # % label
+        label = f"{int(round(pct*100))}%"
+        d.text((bar_x + bar_w + 12, bar_y - 2), label, font=f_pct, fill=(255, 255, 255, 255))
+
+    buf = BytesIO()
+    im.convert("RGB").save(buf, format="PNG", optimize=True)
+    buf.seek(0)
+    return buf
+
 
 #--commands--#
 @bot.command(name="bf_stop")
@@ -892,6 +952,10 @@ async def run_game(ctx, game: BiteFightGame):
         # MUST unpack and pass files
         embed, files = brand_embed(embed, files_list=files)
         await game.channel.send(embed=embed, files=files)
+
+        hp_panel = build_hp_panel_image(game)
+        await game.channel.send(file=discord.File(hp_panel, filename=f"hp_{game.round_num}.png"))
+
 
         # -------- end condition & winner embed --------
         alive_now = alive_players(game)
