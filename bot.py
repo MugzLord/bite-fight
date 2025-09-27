@@ -367,7 +367,7 @@ async def build_versus_card(
     card.alpha_composite(ra, dest=(W - pad - face, pad))
 
     # --- winner/loser ribbons + badges ---
-    rb_h = 120  # big badge band
+    rb_h = 44  # big badge band
     left_rect  = (pad, pad + face - rb_h, pad + face, pad + face)
     right_rect = (W - pad - face, pad + face - rb_h, W - pad, pad + face)
 
@@ -685,14 +685,18 @@ async def build_profile_card(member: discord.Member) -> BytesIO:
     out.seek(0)
     return out
 
-def hp_bar(cur: int, max_hp: int, width: int = 18) -> str:
+def hp_bar(cur: int, max_hp: int, width: int = 24) -> str:
     cur = max(0, min(cur, max_hp))
-    pct = (cur / max_hp) if max_hp else 0
-    filled = int(round(width * pct)) if max_hp else 0
-    # Colour by remaining HP: green > yellow > red
+    pct = (cur / max_hp) if max_hp else 0.0
+    filled = int(round(width * pct))
+
+    # color-coded fill (same thresholds you wanted)
     fill = "🟩" if pct >= 2/3 else ("🟨" if pct >= 1/3 else "🟥")
     empty = "⬛"
-    return fill * filled + empty * (width - filled)
+
+    # slim-ish look using caps + emoji blocks
+    return f"▏{fill * filled}{empty * (width - filled)}▕"
+
 
 def brand_embed(embed: discord.Embed, files_list=None):
     """Attach the Bite & Fight logo as an embed thumbnail.
