@@ -205,7 +205,6 @@ class LobbyView(discord.ui.View):
             return
         embed = self.message.embeds[0]
         joined = len(self.game.players)
-        # keep the same title/description/color/etc., just refresh footer text
         embed.set_footer(text=f"Host: {self.game._ctx.author.display_name} • Lobby closes in 30s • {joined} joined")
         try:
             await self.message.edit(embed=embed, view=self)
@@ -213,7 +212,6 @@ class LobbyView(discord.ui.View):
             pass
 
     async def update_counter(self):
-        # no Status field anymore, only footer is updated
         await self._set_footer()
 
     @discord.ui.button(label="Join", emoji="🍔", style=discord.ButtonStyle.success)
@@ -286,7 +284,7 @@ def pick_target(game: BiteFightGame, attacker: discord.Member):
 def clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
-# ---- Versus Card (swords overlay + greying loser + SLIM HP FOOTER) ----
+# ---- Versus Card (swords overlay + greying loser) ----
 async def fetch_avatar(member: discord.Member, size=256) -> Image.Image:
     try:
         b = await member.display_avatar.replace(size=size, format="png").read()
@@ -397,8 +395,8 @@ async def build_versus_card(
             if path:
                 try:
                     ic = Image.open(path).convert("RGBA")
-                    max_w_frac = 0.80
-                    overshoot   = 1.80
+                    max_w_frac = 0.70
+                    overshoot   = 1.60
                     scale = min((rw * max_w_frac) / ic.width, (rh * overshoot) / ic.height)
                     ic = ic.resize((max(1, int(ic.width * scale)), max(1, int(ic.height * scale))), Image.LANCZOS)
                     px = x0 + (rw - ic.width) // 2
@@ -434,7 +432,7 @@ async def build_versus_card(
             pass
 
     # --- action text strip (bigger, auto-fit, outlined) ---
-    strip_h = 120
+    strip_h = 100
     strip = Image.new("RGBA", (W - pad * 2, strip_h), (0, 0, 0, 170))
     card.alpha_composite(strip, dest=(pad, H - pad - strip_h))
     draw = ImageDraw.Draw(card)
@@ -553,7 +551,7 @@ async def bf_start(ctx):
 
     title = f"{ctx.guild.name or 'Bite & Fight'} — Arena"
     subtitle = "Part 1 - Setting The Table"
-    desc = "🍔 to join the fight!"
+    desc = "🍔 to join the fight!"  # keep this, remove the 'let the battle begin' line
     
     embed = discord.Embed(
         title=title,
@@ -561,8 +559,10 @@ async def bf_start(ctx):
         color=discord.Color.dark_gold()
     )
           
+    # NO Status field anymore
     if game.is_tournament:
         embed.add_field(name="Pot", value=f"💰 {game.pot} • Entry {game.entry_fee}", inline=False)
+        # Footer shows host + timer (player count will be appended by the view)
     embed.set_footer(text=f"Host: {ctx.author.display_name} • Lobby closes in 30s")
     
     view = LobbyView(game, host=ctx.author, timeout=30.0)
@@ -589,6 +589,7 @@ async def bf_begin(ctx):
     chan_id = ctx.channel.id
     game = GAMES.get(chan_id)
 
+    # guards
     if not game or not game.in_lobby:
         return
     if len(game.players) < 2:
@@ -596,11 +597,13 @@ async def bf_begin(ctx):
         game.reset()
         return
 
+    # flip state
     game.in_lobby = False
     game.running = True
     game.round_num = 0
     game.start_time = datetime.datetime.utcnow()
 
+    # disable lobby buttons if that message still exists
     if game.lobby_view and game.lobby_view.message:
         try:
             for c in game.lobby_view.children:
@@ -610,6 +613,7 @@ async def bf_begin(ctx):
         except Exception:
             pass
 
+    # Pixxie-style intro card (names only; no HP)
     intro = line("intro", game.banter) or "A hush falls. Then the roar. Time to settle scores."
     names_only = "\n".join(p.display_name for p in game.players) or "No challengers"
 
@@ -632,6 +636,7 @@ async def bf_begin(ctx):
     embed, brand_files = brand_embed(embed)
     await ctx.send(embed=embed, files=brand_files)
 
+    # run rounds; if anything blows up, show it so it doesn't look "stuck"
     try:
         await run_game(ctx, game)
     except Exception as e:
@@ -639,6 +644,7 @@ async def bf_begin(ctx):
         await ctx.send(f"⚠️ Game crashed: `{e}`")
         
 async def build_profile_card(member: discord.Member) -> BytesIO:
+    # avatar
     try:
         b = await member.display_avatar.replace(size=512, format="png").read()
         av = Image.open(BytesIO(b)).convert("RGBA")
@@ -646,10 +652,12 @@ async def build_profile_card(member: discord.Member) -> BytesIO:
         av = Image.new("RGBA", (512, 512), (40, 40, 40, 255))
     av = av.resize((512, 512), Image.LANCZOS)
 
+    # round it
     m = Image.new("L", (512, 512), 0)
     ImageDraw.Draw(m).rounded_rectangle((0, 0, 512, 512), radius=40, fill=255)
     av.putalpha(m)
 
+    # canvas = your versus background (fallback to dark if missing)
     W, H = 900, 500
     try:
         bg_path = find_asset(["versus_bg.png", "versus_bg.jpg", "bf bg.png"])
@@ -658,8 +666,10 @@ async def build_profile_card(member: discord.Member) -> BytesIO:
         background = Image.new("RGBA", (W, H), (20, 20, 24, 255))
     canvas = background.copy()
 
+    # place avatar
     canvas.paste(av, (32, 32), av)
 
+    # name text
     draw = ImageDraw.Draw(canvas)
     try:
         fnt = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 44)
@@ -673,6 +683,9 @@ async def build_profile_card(member: discord.Member) -> BytesIO:
     return out
 
 def brand_embed(embed: discord.Embed, files_list=None):
+    """Attach the Bite & Fight logo as an embed thumbnail.
+    Returns (embed, files) so the caller can pass files=... when sending.
+    """
     path = find_asset(["logo.png", "logo.jpg", "logo.jpeg"])
     files = list(files_list or [])
     if path:
@@ -681,6 +694,7 @@ def brand_embed(embed: discord.Embed, files_list=None):
     return embed, files
 
 def build_hp_panel_image(game) -> BytesIO:
+    """Small image that shows a Catfight-style HP bar for each player."""
     from PIL import Image, ImageDraw, ImageFont
     from io import BytesIO
 
@@ -705,12 +719,15 @@ def build_hp_panel_image(game) -> BytesIO:
     def draw_slider(x, y, w, h, pct, fill_rgb):
         pct = max(0.0, min(1.0, float(pct)))
         r = h // 2
+        # track
         d.rounded_rectangle((x, y, x + w, y + h), radius=r, fill=(180, 180, 180, 160))
+        # fill (keep rounded ends for tiny values)
         fw = int(w * pct)
         if 0 < fw < r * 2:
             fw = r * 2
         if fw > 0:
             d.rounded_rectangle((x, y, x + fw, y + h), radius=r, fill=(*fill_rgb, 230))
+        # highlight
         d.rectangle((x, y, x + w, y + h//2), fill=(255, 255, 255, 25))
 
     for i, p in enumerate(players):
@@ -718,8 +735,10 @@ def build_hp_panel_image(game) -> BytesIO:
         hp = game.hp.get(p.id, 0)
         pct = hp / game.max_hp if game.max_hp else 0.0
 
+        # name
         d.text((pad, y + (row_h - 22)//2), p.display_name, font=f_name, fill=(255, 255, 255, 255))
 
+        # colour by HP (green / yellow / red)
         if pct >= 2/3:
             col = (46, 204, 113)
         elif pct >= 1/3:
@@ -727,11 +746,13 @@ def build_hp_panel_image(game) -> BytesIO:
         else:
             col = (231, 76, 60)
 
+        # slider
         bar_x = pad + name_w
         bar_w = W - pad - bar_x - 60
         bar_y = y + (row_h - bar_h)//2
         draw_slider(bar_x, bar_y, bar_w, bar_h, pct, col)
 
+        # % label
         label = f"{int(round(pct*100))}%"
         d.text((bar_x + bar_w + 12, bar_y - 2), label, font=f_pct, fill=(255, 255, 255, 255))
 
@@ -776,7 +797,7 @@ async def run_game(ctx, game: BiteFightGame):
     while game.running:
         game.round_num += 1
         events = []
-        file = None
+        file = None  # always defined for this round
 
         # -------- bleed ticks first --------
         for p in list(alive_players(game)):
@@ -835,7 +856,7 @@ async def run_game(ctx, game: BiteFightGame):
                     if game.hp[target.id] <= 0:
                         game.kills[attacker.id] += 1
                         events.append(format_line(
-                            line("death_bite", game.banter) | "[target] falls to the fangs.",
+                            line("death_bite", game.banter) or "[target] falls to the fangs.",  # <-- FIXED HERE
                             attacker=attacker.display_name, target=target.display_name
                         ))
             else:
@@ -862,7 +883,7 @@ async def run_game(ctx, game: BiteFightGame):
                             attacker=attacker.display_name, target=target.display_name
                         ))
 
-        # -------- choose a key play & build the image --------
+        # -------- choose a key play & build the image (avatars + swords) --------
         if not events:
             events.append("The fighters circle, waiting for an opening.")
 
@@ -873,6 +894,7 @@ async def run_game(ctx, game: BiteFightGame):
                 lower = key_play.lower()
                 attacker_missed = ("miss" in lower and key_attacker.display_name in lower)
 
+                # Randomize sides: ~50% we swap A/T on the card.
                 swap = bool(random.getrandbits(1))
                 left = key_attacker
                 right = key_target
@@ -895,7 +917,7 @@ async def run_game(ctx, game: BiteFightGame):
             except Exception:
                 file = None  # never crash a round just for the art
 
-        # -------- build the round embed (no inline HP field) --------
+        # -------- build the round embed (always) --------
         embed = discord.Embed(
             title=f"Bite & Fight — Round {game.round_num}",
             description=line("round_intro", game.banter) or "",
@@ -904,26 +926,31 @@ async def run_game(ctx, game: BiteFightGame):
         )
         embed.add_field(name="Events", value="\n".join(events)[:1024], inline=False)
 
+        # (ugly inline HP field removed)
+
         files = []
         if file is not None:
             embed.set_image(url=f"attachment://round_{game.round_num}.png")
             files.append(file)
         
+        # MUST unpack and pass files
         embed, files = brand_embed(embed, files_list=files)
         await game.channel.send(embed=embed, files=files)
 
-        # keep separate HP panel image
         hp_panel = build_hp_panel_image(game)
         await game.channel.send(file=discord.File(hp_panel, filename=f"hp_{game.round_num}.png"))
 
-        # -------- end condition --------
+
+        # -------- end condition & winner embed --------
         alive_now = alive_players(game)
         if len(alive_now) <= 1:
             winner = alive_now[0] if alive_now else None
 
+            # Compute time survived
             ended_at = datetime.datetime.utcnow()
             dur_secs = int((ended_at - game.start_time).total_seconds()) if game.start_time else 0
 
+            # Persist lifetime stats
             stats = _load_stats()
             guild_id = ctx.guild.id if ctx.guild else "dm"
             if str(guild_id) not in stats["guilds"]:
@@ -939,24 +966,34 @@ async def run_game(ctx, game: BiteFightGame):
                     _bump(stats["guilds"][str(guild_id)]["kills"], uid, k)
             _save_stats(stats)
 
+            # ---- TOURNAMENT STATS (wins, kills, credits, totals) ----
             if game.is_tournament:
                 state = _tourney_state_load()
                 tid = state.get("id")
+            
                 all_ts = _tourney_stats_all()
                 ts = all_ts.get(tid, {"wins": {}, "kills": {}, "credits_won": {}, "games": 0, "pots": 0})
+            
                 if winner:
                     _bump(ts["wins"], winner.id, 1)
+                    # credit the winner with this game's pot; change to a fixed value if you prefer
                     _bump(ts["credits_won"], winner.id, game.pot)
+            
                 for uid, k in game.kills.items():
                     if k > 0:
                         _bump(ts["kills"], uid, k)
+            
                 ts["games"] = ts.get("games", 0) + 1
                 ts["pots"]  = ts.get("pots", 0) + game.pot
+            
                 all_ts[tid] = ts
                 _tourney_stats_save(all_ts)
+            
+                # reflect progress on the active tournament
                 state["games_played"] = int(state.get("games_played", 0)) + 1
                 _tourney_state_save(state)
 
+            # ---------- Winner card  ----------
             total_kills_this_match = sum(game.kills.values())
             wins_in_server = stats["guilds"][str(guild_id)]["wins"].get(str(winner.id), 0) if winner else 0
             wins_global = stats["global"]["wins"].get(str(winner.id), 0) if winner else 0
@@ -978,11 +1015,17 @@ async def run_game(ctx, game: BiteFightGame):
                 color=discord.Color.gold(),
                 timestamp=datetime.datetime.utcnow()
             )
+            
+            # winner avatar as AUTHOR ICON (leave thumbnail for logo)
             if winner:
                 av = winner.display_avatar.replace(size=256, static_format="png").url
                 w_embed.set_author(name=winner.display_name, icon_url=av)
+            
+            # small Bite & Fight logo INSIDE the embed (via brand_embed)
             files_to_send = []
-            w_embed, files_to_send = brand_embed(w_embed)
+            w_embed, files_to_send = brand_embed(w_embed)   # returns (embed, files)
+            
+            # --- POST PROFILE IMAGE ABOVE THE WINNER EMBED
             if winner:
                 try:
                     buf = await build_profile_card(winner)
@@ -990,6 +1033,8 @@ async def run_game(ctx, game: BiteFightGame):
                     av_bytes = await winner.display_avatar.replace(size=512, format="png").read()
                     buf = BytesIO(av_bytes)
                 await game.channel.send(file=discord.File(buf, filename="profile.png"))
+            
+            # --- "My Stats" button
             view = discord.ui.View(timeout=None)
             if winner:
                 view.add_item(discord.ui.Button(
@@ -997,13 +1042,17 @@ async def run_game(ctx, game: BiteFightGame):
                     style=discord.ButtonStyle.secondary,
                     custom_id=f"bf_stats:{winner.id}",
                 ))
+            
+            # --- SEND THE WINNER EMBED
             if files_to_send:
                 await game.channel.send(embed=w_embed, files=files_to_send, view=view)
             else:
                 await game.channel.send(embed=w_embed, view=view)
+            
             game.reset()
             return
 
+        # small pause between rounds
         await asyncio.sleep(2.0)
 
 
@@ -1058,7 +1107,7 @@ async def bf_tourney_start(ctx, games: int = 10, entry: int = None, *, name: str
     tid = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     ante = int(entry) if entry is not None else CHANNEL_ANTE.get(ctx.channel.id, int(os.getenv("BF_ANTE", "100")))
     if entry is not None:
-        CHANNEL_ANTE[ctx.channel.id] = ante
+        CHANNEL_ANTE[ctx.channel.id] = ante  # remember host choice for this channel
     state.update({
         "active": True, "id": tid, "name": name or f"Tournament {tid}",
         "ante": ante, "channel_id": ctx.channel.id,
@@ -1223,8 +1272,7 @@ async def bf_dbg_assets(ctx):
 async def bf_cardtest(ctx, left: discord.Member=None, right: discord.Member=None, *, text: str="Swords check"):
     left = left or ctx.author
     right = right or ctx.author
-    img = await build_versus_card(left, right, text, grey_right=True,
-                                  left_hp=100, right_hp=73, max_hp=100)
+    img = await build_versus_card(left, right, text, grey_right=True)
     await ctx.send(file=discord.File(img, filename="test_card.png"))
     
 @bot.event
@@ -1232,17 +1280,19 @@ async def on_interaction(interaction: discord.Interaction):
     data = interaction.data or {}
     cid = data.get("custom_id", "")
 
+    # --- profile image (from the winner button above the embed)
     if interaction.type.name == "component" and cid.startswith("bf_profile:"):
         uid = int(cid.split(":")[1])
         member = interaction.guild.get_member(uid) or await interaction.client.fetch_user(uid)
 
         buf = await build_profile_card(member)
-        await interaction.response.send_message(
+        await interaction.response.send_message(  # <-- SEND THE FILE HERE
             file=discord.File(buf, filename="profile.png"),
             ephemeral=True
         )
-        return
+        return  # ensure we don't try to respond again
 
+    # --- stats button (acts like !bf_profile)
     elif interaction.type.name == "component" and cid.startswith("bf_stats:"):
         uid = int(cid.split(":")[1])
         member = interaction.guild.get_member(uid) or await interaction.client.fetch_user(uid)
@@ -1256,7 +1306,7 @@ async def on_interaction(interaction: discord.Interaction):
         kills_global = stats["global"]["kills"].get(str(uid), 0)
 
         e = discord.Embed(
-            title=f"Bite & Fight — {member.display_name}",
+            title=f"Bite & Fight — {member.display_name}",   # <-- use member.display_name
             color=discord.Color.dark_gold()
         )
         e.add_field(name="Wins (this server)", value=f"{wins_server}", inline=True)
