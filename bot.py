@@ -286,19 +286,7 @@ def pick_target(game: BiteFightGame, attacker: discord.Member):
 def clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
-# Text HP bar (fixes NameError: hp_bar is not defined)
-def hp_bar(current: int, maximum: int, width: int = 18) -> str:
-    """Return a slim text HP bar like [██████      ] sized by 'width'."""
-    if maximum <= 0:
-        maximum = 1
-    ratio = max(0.0, min(1.0, float(current) / float(maximum)))
-    filled = int(round(ratio * width))
-    if current > 0 and filled == 0:
-        filled = 1
-    empty = width - filled
-    return "[" + ("█" * filled) + (" " * empty) + "]"
-
-# ---- Versus Card (swords overlay + greying loser) ----
+# ---- Versus Card (swords overlay + greying loser + SLIM HP FOOTER) ----
 async def fetch_avatar(member: discord.Member, size=256) -> Image.Image:
     try:
         b = await member.display_avatar.replace(size=size, format="png").read()
@@ -336,7 +324,7 @@ async def build_versus_card(
     from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance
     from io import BytesIO
 
-    W, H = 900, 380
+    W, H = 900, 500
     pad = 32
     face = 360
 
@@ -379,7 +367,7 @@ async def build_versus_card(
     card.alpha_composite(ra, dest=(W - pad - face, pad))
 
     # --- winner/loser ribbons + badges ---
-    rb_h = 50
+    rb_h = 120  # big badge band
     left_rect  = (pad, pad + face - rb_h, pad + face, pad + face)
     right_rect = (W - pad - face, pad + face - rb_h, W - pad, pad + face)
 
@@ -409,8 +397,8 @@ async def build_versus_card(
             if path:
                 try:
                     ic = Image.open(path).convert("RGBA")
-                    max_w_frac = 0.65
-                    overshoot   = 1.20
+                    max_w_frac = 0.80
+                    overshoot   = 1.80
                     scale = min((rw * max_w_frac) / ic.width, (rh * overshoot) / ic.height)
                     ic = ic.resize((max(1, int(ic.width * scale)), max(1, int(ic.height * scale))), Image.LANCZOS)
                     px = x0 + (rw - ic.width) // 2
@@ -445,8 +433,8 @@ async def build_versus_card(
         except Exception:
             pass
 
-    # --- action text strip ---
-    strip_h = 80
+    # --- action text strip (bigger, auto-fit, outlined) ---
+    strip_h = 120
     strip = Image.new("RGBA", (W - pad * 2, strip_h), (0, 0, 0, 170))
     card.alpha_composite(strip, dest=(pad, H - pad - strip_h))
     draw = ImageDraw.Draw(card)
@@ -467,7 +455,76 @@ async def build_versus_card(
 
     tx = pad + 16
     ty = H - pad - strip_h + (strip_h - fnt.getbbox(text)[3]) // 2 - 6
-    draw.text((tx, ty), text, font=fnt, fill=(255, 255, 255, 255), stroke_width=3, stroke_fill=(0, 0, 0, 180))
+    draw.text(
+        (tx, ty),
+        text,
+        font=fnt,
+        fill=(255, 255, 255, 255),
+        stroke_width=3,
+        stroke_fill=(0, 0, 0, 180),
+    )
+
+    # --- Catfight-style HP sliders (bottom footer) ---
+    if left_hp is not None and right_hp is not None and max_hp:
+        footer_h = 64
+        new_card = Image.new("RGBA", (W, H + footer_h), (24, 24, 24, 255))  # dark footer
+        new_card.alpha_composite(card, dest=(0, 0))
+        card = new_card
+        H = H + footer_h
+    
+        def _draw_slider(x, y, w, h, pct, fill_rgb):
+            pct = max(0.0, min(1.0, float(pct)))
+            r = h // 2
+    
+            # track (soft grey)
+            track = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            d = ImageDraw.Draw(track)
+            d.rounded_rectangle((0, 0, w, h), radius=r, fill=(180, 180, 180, 160))
+            card.alpha_composite(track, dest=(x, y))
+    
+            # fill (keep rounded ends visible for tiny values)
+            fw = int(w * pct)
+            if 0 < fw < r * 2:
+                fw = r * 2
+            if fw > 0:
+                fill = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+                df = ImageDraw.Draw(fill)
+                df.rounded_rectangle((0, 0, fw, h), radius=r, fill=(*fill_rgb, 230))
+                card.alpha_composite(fill, dest=(x, y))
+    
+            # subtle highlight
+            hi = Image.new("RGBA", (w, h // 2), (255, 255, 255, 30))
+            card.alpha_composite(hi, dest=(x, y))
+    
+        # bar geometry (in the footer, vertically centered)
+        bar_h = 22
+        left_x  = pad
+        right_x = W - pad - face
+        bar_w   = face
+        y0 = H - footer_h + (footer_h - bar_h) // 2  # centered in footer
+    
+        green = (46, 204, 113)   # left
+        pink  = (236, 64, 122)   # right
+    
+        lp = (left_hp / max_hp) if max_hp else 0.0
+        rp = (right_hp / max_hp) if max_hp else 0.0
+    
+        _draw_slider(left_x,  y0, bar_w, bar_h, lp, green)
+        _draw_slider(right_x, y0, bar_w, bar_h, rp, pink)
+    
+        # percent labels (white, to the right of each bar)
+        try:
+            pf = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
+        except Exception:
+            pf = ImageFont.load_default()
+        draw = ImageDraw.Draw(card)
+        lw = f"{int(round(lp*100))}%"
+        rw = f"{int(round(rp*100))}%"
+        th = pf.getbbox(lw)[3]
+        draw.text((left_x  + bar_w + 10, y0 + (bar_h - th)//2 - 2), lw, font=pf, fill=(255,255,255,255))
+        th = pf.getbbox(rw)[3]
+        draw.text((right_x + bar_w + 10, y0 + (bar_h - th)//2 - 2), rw, font=pf, fill=(255,255,255,255))
+    # --- end sliders ---
 
     buf = BytesIO()
     card.convert("RGB").save(buf, format="PNG", optimize=True)
@@ -654,7 +711,7 @@ def build_hp_panel_image(game) -> BytesIO:
             fw = r * 2
         if fw > 0:
             d.rounded_rectangle((x, y, x + fw, y + h), radius=r, fill=(*fill_rgb, 230))
-        #d.rectangle((x, y, x + w, y + h//2), fill=(255, 255, 255, 25))
+        d.rectangle((x, y, x + w, y + h//2), fill=(255, 255, 255, 25))
 
     for i, p in enumerate(players):
         y = pad + i * row_h
@@ -677,10 +734,6 @@ def build_hp_panel_image(game) -> BytesIO:
 
         label = f"{int(round(pct*100))}%"
         d.text((bar_x + bar_w + 12, bar_y - 2), label, font=f_pct, fill=(255, 255, 255, 255))
-        
-        #bottom crop#
-        crop_bottom = 24  # pixels to remove
-        card = card.crop((0, 0, card.width, card.height - crop_bottom))
 
     buf = BytesIO()
     im.convert("RGB").save(buf, format="PNG", optimize=True)
@@ -782,7 +835,7 @@ async def run_game(ctx, game: BiteFightGame):
                     if game.hp[target.id] <= 0:
                         game.kills[attacker.id] += 1
                         events.append(format_line(
-                            line("death_bite", game.banter) or "[target] falls to the fangs.",
+                            line("death_bite", game.banter) | "[target] falls to the fangs.",
                             attacker=attacker.display_name, target=target.display_name
                         ))
             else:
@@ -809,6 +862,7 @@ async def run_game(ctx, game: BiteFightGame):
                             attacker=attacker.display_name, target=target.display_name
                         ))
 
+        # -------- choose a key play & build the image --------
         if not events:
             events.append("The fighters circle, waiting for an opening.")
 
@@ -839,9 +893,9 @@ async def run_game(ctx, game: BiteFightGame):
 
                 file = discord.File(img_bytes, filename=f"round_{game.round_num}.png")
             except Exception:
-                file = None
+                file = None  # never crash a round just for the art
 
-        # -------- build the round embed (always) --------
+        # -------- build the round embed (no inline HP field) --------
         embed = discord.Embed(
             title=f"Bite & Fight — Round {game.round_num}",
             description=line("round_intro", game.banter) or "",
@@ -849,8 +903,6 @@ async def run_game(ctx, game: BiteFightGame):
             timestamp=datetime.datetime.utcnow()
         )
         embed.add_field(name="Events", value="\n".join(events)[:1024], inline=False)
-
-        # (HP text bar REMOVED entirely)
 
         files = []
         if file is not None:
@@ -860,10 +912,11 @@ async def run_game(ctx, game: BiteFightGame):
         embed, files = brand_embed(embed, files_list=files)
         await game.channel.send(embed=embed, files=files)
 
+        # keep separate HP panel image
         hp_panel = build_hp_panel_image(game)
         await game.channel.send(file=discord.File(hp_panel, filename=f"hp_{game.round_num}.png"))
 
-        # -------- end condition & winner embed --------
+        # -------- end condition --------
         alive_now = alive_players(game)
         if len(alive_now) <= 1:
             winner = alive_now[0] if alive_now else None
@@ -925,14 +978,11 @@ async def run_game(ctx, game: BiteFightGame):
                 color=discord.Color.gold(),
                 timestamp=datetime.datetime.utcnow()
             )
-            
             if winner:
                 av = winner.display_avatar.replace(size=256, static_format="png").url
                 w_embed.set_author(name=winner.display_name, icon_url=av)
-            
             files_to_send = []
             w_embed, files_to_send = brand_embed(w_embed)
-            
             if winner:
                 try:
                     buf = await build_profile_card(winner)
@@ -940,7 +990,6 @@ async def run_game(ctx, game: BiteFightGame):
                     av_bytes = await winner.display_avatar.replace(size=512, format="png").read()
                     buf = BytesIO(av_bytes)
                 await game.channel.send(file=discord.File(buf, filename="profile.png"))
-            
             view = discord.ui.View(timeout=None)
             if winner:
                 view.add_item(discord.ui.Button(
@@ -948,12 +997,10 @@ async def run_game(ctx, game: BiteFightGame):
                     style=discord.ButtonStyle.secondary,
                     custom_id=f"bf_stats:{winner.id}",
                 ))
-            
             if files_to_send:
                 await game.channel.send(embed=w_embed, files=files_to_send, view=view)
             else:
                 await game.channel.send(embed=w_embed, view=view)
-            
             game.reset()
             return
 
@@ -1176,7 +1223,8 @@ async def bf_dbg_assets(ctx):
 async def bf_cardtest(ctx, left: discord.Member=None, right: discord.Member=None, *, text: str="Swords check"):
     left = left or ctx.author
     right = right or ctx.author
-    img = await build_versus_card(left, right, text, grey_right=True)
+    img = await build_versus_card(left, right, text, grey_right=True,
+                                  left_hp=100, right_hp=73, max_hp=100)
     await ctx.send(file=discord.File(img, filename="test_card.png"))
     
 @bot.event
