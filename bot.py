@@ -702,10 +702,11 @@ def build_hp_panel_image(game) -> BytesIO:
     n = max(1, len(players))
 
     # Wider canvas so Discord’s downscale doesn’t crush text
-    W = 1400
-    row_h = 56
+    W = 640
+    row_h = 52
     pad = 20
     bar_h = 14
+    name_w = 300   # <— reserve space for the left names
 
     # ---- fonts (force a real TTF; avoid tiny bitmap fallback) ----
     pil_ttf = os.path.join(os.path.dirname(PIL.__file__), "fonts", "DejaVuSans-Bold.ttf")
@@ -715,8 +716,8 @@ def build_hp_panel_image(game) -> BytesIO:
         or "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
     )
     try:
-        f_name = ImageFont.truetype(font_path, 36)   # left names
-        f_pct  = ImageFont.truetype(font_path, 32)   # right %
+        f_name = ImageFont.truetype(font_path, 34)   # left names
+        f_pct  = ImageFont.truetype(font_path, 30)   # right %
     except Exception:
         f_name = f_pct = ImageFont.load_default()
 
