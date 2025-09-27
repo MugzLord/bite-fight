@@ -367,7 +367,7 @@ async def build_versus_card(
     card.alpha_composite(ra, dest=(W - pad - face, pad))
 
     # --- winner/loser ribbons + badges ---
-    rb_h = 44  # big badge band
+    rb_h = 120  # big badge band
     left_rect  = (pad, pad + face - rb_h, pad + face, pad + face)
     right_rect = (W - pad - face, pad + face - rb_h, W - pad, pad + face)
 
@@ -393,17 +393,29 @@ async def build_versus_card(
             path = find_asset(name_map[kind]) if 'find_asset' in globals() else None
             x0, y0, x1, y1 = rect
             rw, rh = (x1 - x0), (y1 - y0)
+        
             if path:
                 try:
                     ic = Image.open(path).convert("RGBA")
-                    scale = min((rw - 8) / ic.width, (rh - 8) / ic.height)  # nearly fill band
+        
+                    # --- BIGGER BADGE ---
+                    # allow the icon to be wider than the ribbon and taller than the ribbon
+                    max_w_frac = 0.80      # up to 80% of the face width
+                    overshoot   = 1.80     # 180% of ribbon height (overlap above the band)
+        
+                    scale = min((rw * max_w_frac) / ic.width, (rh * overshoot) / ic.height)
                     ic = ic.resize((max(1, int(ic.width * scale)), max(1, int(ic.height * scale))), Image.LANCZOS)
+        
+                    # center horizontally; lift it so ~40% sits above the ribbon
                     px = x0 + (rw - ic.width) // 2
-                    py = y0 + (rh - ic.height) // 2 - 6
+                    py = y0 + (rh - ic.height) // 2 - int(rh * 0.40)
+        
                     card.alpha_composite(ic, dest=(px, py))
                     return
                 except Exception:
                     pass
+        
+            # text fallback (also bigger)
             try:
                 f = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 64)
             except Exception:
@@ -411,8 +423,9 @@ async def build_versus_card(
             label = "RIP" if kind == "rip" else "WIN"
             tw = int(f.getlength(label)); th = f.getbbox(label)[3]
             px = x0 + (rw - tw) // 2
-            py = y0 + (rh - th) // 2 - 2
-            ImageDraw.Draw(card).text((px, py), label, font=f, fill=(255, 255, 255, 255))
+            py = y0 + (rh - th) // 2 - int(rh * 0.20)
+            ImageDraw.Draw(card).text((px, py), label, font=f, fill=(255,255,255,255))
+
 
         _paste_badge(left_badge,  left_rect)
         _paste_badge(right_badge, right_rect)
