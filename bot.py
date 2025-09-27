@@ -316,6 +316,9 @@ async def build_versus_card(
     action_text: str,
     grey_left: bool = False,
     grey_right: bool = False,
+    left_hp: int | None = None,     # <-- add
+    right_hp: int | None = None,    # <-- add
+    max_hp: int = 100,              # <-- add
 ) -> BytesIO:
     from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance
 
@@ -362,7 +365,7 @@ async def build_versus_card(
     card.alpha_composite(ra, dest=(W - pad - face, pad))
 
     # --- winner/loser ribbons + badges (trophy / RIP)
-    rb_h = 44  # ribbon height
+    rb_h = 120  # ribbon height
     left_rect  = (pad, pad + face - rb_h, pad + face, pad + face)
     right_rect = (W - pad - face, pad + face - rb_h, W - pad, pad + face)
     
@@ -398,17 +401,17 @@ async def build_versus_card(
             if path:
                 try:
                     ic = Image.open(path).convert("RGBA")
-                    scale = min((rw - 16) / ic.width, (rh - 8) / ic.height)
+                    scale = min((rw - 8) / ic.width, (rh - 8) / ic.height)  # fill the band
                     ic = ic.resize((max(1, int(ic.width * scale)), max(1, int(ic.height * scale))), Image.LANCZOS)
                     px = x0 + (rw - ic.width) // 2
-                    py = y0 + (rh - ic.height) // 2
-                    card.alpha_composite(ic, dest=(px, py))
+                    py = y0 + (rh - ic.height) // 2 - 6
+                    card.alpha_composite(ic, dest=(px, py)) # fill the band
                     return
                 except Exception:
                     pass
             # fallback: simple label
             try:
-                f = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 24)
+                f = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 64)
             except Exception:
                 f = ImageFont.load_default()
             label = "RIP" if kind == "rip" else "WIN"
@@ -473,6 +476,68 @@ async def build_versus_card(
     tx = pad + 16
     ty = H - pad - strip_h + (strip_h - fnt.getbbox(text)[3]) // 2 - 6
     draw.text((tx, ty), text, font=fnt, fill=(255, 255, 255, 255))
+
+    # --- Catfight-style HP sliders (optional) ---
+if left_hp is not None and right_hp is not None and max_hp:
+    def _draw_slider(x, y, w, h, pct, fill_rgb):
+        pct = max(0.0, min(1.0, float(pct)))
+        r = h // 2
+
+        # track (soft grey)
+        track = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        d = ImageDraw.Draw(track)
+        d.rounded_rectangle((0, 0, w, h), radius=r, fill=(180, 180, 180, 160))
+        card.alpha_composite(track, dest=(x, y))
+
+        # fill (keep rounded ends visible for tiny values)
+        fw = int(w * pct)
+        if 0 < fw < r * 2:
+            fw = r * 2
+        if fw > 0:
+            fill = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            df = ImageDraw.Draw(fill)
+            df.rounded_rectangle((0, 0, fw, h), radius=r, fill=(*fill_rgb, 230))
+            card.alpha_composite(fill, dest=(x, y))
+
+        # subtle highlight
+        hi = Image.new("RGBA", (w, h // 2), (255, 255, 255, 30))
+        card.alpha_composite(hi, dest=(x, y))
+
+    # positions (under avatars, above the action strip)
+    bar_h = 24
+    gap_y = 12
+    y0 = H - pad - strip_h - gap_y - bar_h  # uses your existing strip_h/pad
+
+    # widths under each face
+    left_x  = pad
+    right_x = W - pad - face
+    bar_w   = face
+
+    # colours (Catfight-like)
+    green = (46, 204, 113)   # left bar
+    pink  = (236, 64, 122)   # right bar
+
+    # percentages
+    lp = (left_hp / max_hp) if max_hp else 0.0
+    rp = (right_hp / max_hp) if max_hp else 0.0
+
+    # draw bars
+    _draw_slider(left_x,  y0, bar_w, bar_h, lp, green)
+    _draw_slider(right_x, y0, bar_w, bar_h, rp, pink)
+
+    # percent labels (white, to the right of each bar)
+    try:
+        pf = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
+    except Exception:
+        pf = ImageFont.load_default()
+    lw = f"{int(round(lp*100))}%"
+    rw = f"{int(round(rp*100))}%"
+    draw = ImageDraw.Draw(card)
+    th = pf.getbbox(lw)[3]
+    draw.text((left_x  + bar_w + 10, y0 + (bar_h - th)//2 - 2), lw, font=pf, fill=(255,255,255,255))
+    draw.text((right_x + bar_w + 10, y0 + (bar_h - th)//2 - 2), rw, font=pf, fill=(255,255,255,255))
+# --- end sliders ---
+
 
     buf = BytesIO()
     card.convert("RGB").save(buf, format="PNG", optimize=True)
@@ -634,8 +699,12 @@ async def build_profile_card(member: discord.Member) -> BytesIO:
 
 def hp_bar(cur: int, max_hp: int, width: int = 18) -> str:
     cur = max(0, min(cur, max_hp))
-    filled = int(round(width * (cur / max_hp))) if max_hp else 0
-    return "▰" * filled + "▱" * (width - filled)
+    pct = (cur / max_hp) if max_hp else 0
+    filled = int(round(width * pct)) if max_hp else 0
+    # Colour by remaining HP: green > yellow > red
+    fill = "🟩" if pct >= 2/3 else ("🟨" if pct >= 1/3 else "🟥")
+    empty = "⬛"
+    return fill * filled + empty * (width - filled)
 
 def brand_embed(embed: discord.Embed, files_list=None):
     """Attach the Bite & Fight logo as an embed thumbnail.
@@ -816,7 +885,7 @@ async def run_game(ctx, game: BiteFightGame):
             bar = hp_bar(hp, game.max_hp, width=18)
             status = "🏆" if hp > 0 else "💀"
             # name on the left, bar centred in a code span, percent on the right
-            lines_hp.append(f"{status} **{p.display_name}**\n`{bar}` {pct}%")
+            lines_hp.append(f"{status} **{p.display_name}**\n{bar} {pct}%")
         embed.add_field(name="HP", value="\n".join(lines_hp)[:1024], inline=False)
 
         files = []
