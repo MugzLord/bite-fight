@@ -469,13 +469,19 @@ async def build_versus_card(
         def draw_slider(x, y, w, h, pct, fill_rgb):
             pct = max(0.0, min(1.0, float(pct)))
             r = h // 2
-            d.rounded_rectangle((x, y, x + w, y + h), radius=r, fill=(180, 180, 180, 160))
+        
+            # darker flat track
+            d.rounded_rectangle((x, y, x + w, y + h), radius=r, fill=(70, 70, 70, 200))
+        
+            # fill (keep rounded ends for tiny values)
             fw = int(w * pct)
             if 0 < fw < r * 2:
                 fw = r * 2
             if fw > 0:
-                d.rounded_rectangle((x, y, x + fw, y + h), radius=r, fill=(*fill_rgb, 230))
-            # (no highlight)
+                d.rounded_rectangle((x, y, x + fw, y + h), radius=r, fill=(*fill_rgb, 235))
+        
+            # NOTE: no white highlight overlay (removed on purpose for readability)
+
 
         bar_h = 22
         left_x  = pad
@@ -568,10 +574,10 @@ def build_hp_panel_image(game) -> BytesIO:
     players = list(game.players)
     n = max(1, len(players))
     W = 900
-    row_h = 40
+    row_h = 35
     pad = 20
     name_w = 220
-    bar_h = 20
+    bar_h = 14
     H = pad * 2 + n * row_h
 
     im = Image.new("RGBA", (W, H), (24, 24, 24, 255))
@@ -832,6 +838,24 @@ async def run_game(ctx, game: BiteFightGame):
                 file = discord.File(img_bytes, filename=f"round_{game.round_num}.png")
             except Exception:
                 file = None  # never crash a round just for the art
+
+            else:
+                # Fallback: still show a card with two players so the image is never missing
+                try:
+                    alive = alive_players(game) or game.players
+                    if len(alive) >= 2:
+                        left, right = alive[0], alive[1]
+                        kp = events[-1] if events else "The battle continues..."
+                        img_bytes = await build_versus_card(
+                            left, right, kp,
+                            grey_left=False, grey_right=False,
+                            left_hp=game.hp.get(left.id, 0),
+                            right_hp=game.hp.get(right.id, 0),
+                            max_hp=game.max_hp,
+                        )
+                        file = discord.File(img_bytes, filename=f"round_{game.round_num}.png")
+                except Exception:
+                    file = None
 
         # -------- build the round embed (always) --------
         embed = discord.Embed(
