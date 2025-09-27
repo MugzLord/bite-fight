@@ -701,8 +701,8 @@ def build_hp_panel_image(game) -> BytesIO:
     players = list(game.players)
     n = max(1, len(players))
     W = 900
-    row_h = 40
-    pad = 20
+    row_h = 32
+    pad = 12
     name_w = 220
     bar_h = 20
     H = pad * 2 + n * row_h
@@ -711,8 +711,8 @@ def build_hp_panel_image(game) -> BytesIO:
     d = ImageDraw.Draw(im)
 
     try:
-        f_name = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
-        f_pct  = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
+        f_name = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 22)
+        f_pct  = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
     except Exception:
         f_name = f_pct = ImageFont.load_default()
 
@@ -720,7 +720,7 @@ def build_hp_panel_image(game) -> BytesIO:
         pct = max(0.0, min(1.0, float(pct)))
         r = h // 2
         # track
-        d.rounded_rectangle((x, y, x + w, y + h), radius=r, fill=(180, 180, 180, 160))
+        d.rounded_rectangle((x, y, x + w, y + h), radius=r, fill=(180, 180, 180, 130)) #old 160
         # fill (keep rounded ends for tiny values)
         fw = int(w * pct)
         if 0 < fw < r * 2:
@@ -736,7 +736,19 @@ def build_hp_panel_image(game) -> BytesIO:
         pct = hp / game.max_hp if game.max_hp else 0.0
 
         # name
-        d.text((pad, y + (row_h - 22)//2), p.display_name, font=f_name, fill=(255, 255, 255, 255))
+        #d.text((pad, y + (row_h - 22)//2), p.display_name, font=f_name, fill=(255, 255, 255, 255))
+        # new
+        name_h = f_name.getbbox(p.display_name)[3]
+        name_y = y + (row_h - name_h) // 2
+        d.text(
+            (pad, name_y),
+            p.display_name,
+            font=f_name,
+            fill=(255, 255, 255, 255),
+            stroke_width=2,
+            stroke_fill=(0, 0, 0, 180),
+        )
+
 
         # colour by HP (green / yellow / red)
         if pct >= 2/3:
@@ -754,7 +766,17 @@ def build_hp_panel_image(game) -> BytesIO:
 
         # % label
         label = f"{int(round(pct*100))}%"
-        d.text((bar_x + bar_w + 12, bar_y - 2), label, font=f_pct, fill=(255, 255, 255, 255))
+        #d.text((bar_x + bar_w + 12, bar_y - 2), label, font=f_pct, fill=(255, 255, 255, 255))
+        # new
+        d.text(
+            (bar_x + bar_w + 12, bar_y - 2),
+            label,
+            font=f_pct,
+            fill=(255, 255, 255, 255),
+            stroke_width=2,
+            stroke_fill=(0, 0, 0, 160),
+        )
+
 
     buf = BytesIO()
     im.convert("RGB").save(buf, format="PNG", optimize=True)
