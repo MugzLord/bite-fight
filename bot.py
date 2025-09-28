@@ -9,7 +9,6 @@ from io import BytesIO
 from discord import File
 from typing import Dict, Tuple, Any
 
-
 import discord
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance
@@ -17,8 +16,6 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance
 # One game per (guild_id, channel_id)
 GAMES: Dict[Tuple[int, int], Any] = {}
 LOBBY_FLAGS: Dict[Tuple[int, int], bool] = {}
-
-
 
 # =========================
 # Config / Env
@@ -37,7 +34,6 @@ BF_PRIZE_CONTACT_TEXT = os.getenv("BF_PRIZE_CONTACT_TEXT", "Claim from @YaEli on
 BF_PRIZE_FILE = os.getenv("BF_PRIZE_FILE", "bf_prize.json")
 # Prize snapshot per channel (locked at tourney start)
 BF_SESSION_PRIZE: dict[int, dict] = {}
-
 
 # Files
 STATS_FILE = os.getenv("BF_STATS_FILE", "bf_stats.json")                 # global/server wins/kills
@@ -65,7 +61,6 @@ def find_asset(candidates: list[str]) -> str | None:
             if os.path.exists(p):
                 return p
     return None
-
 # ==========================
 # Small JSON helpers
 # =========================
@@ -159,7 +154,6 @@ def _bf_prize_save(state: dict):
         pass
 
 BF_PRIZE_STATE = _bf_prize_load()
-
 # =========================
 # Bot
 # =========================
@@ -274,7 +268,6 @@ class LobbyView(discord.ui.View):
         await interaction.response.send_message(f"{user.display_name} joined the arena.", ephemeral=True)
         await self.update_counter()
 
-
     @discord.ui.button(label="Join", emoji="🍔", style=discord.ButtonStyle.success)
     async def join_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         user = interaction.user
@@ -311,7 +304,6 @@ def format_line(t, **kw):
     for k, v in kw.items():
         s = s.replace(f"[{k}]", str(v))
     return s
-
 # ---- Utils ----
 def bf_prize_line(winner_name: str, players_count: int) -> str:
     mode = BF_PRIZE_STATE.get("mode", "creds")
@@ -359,7 +351,6 @@ def grey_out(im: Image.Image, dim: float = 0.55) -> Image.Image:
     g = ImageEnhance.Brightness(g).enhance(dim)
     return g
 
-
 def bf_prize_line_from_state(state: dict, winner_name: str, players_count: int) -> str:
     mode = state.get("mode", "creds")
     if mode == "wishlist":
@@ -370,7 +361,6 @@ def bf_prize_line_from_state(state: dict, winner_name: str, players_count: int) 
     cpp = int(state.get("credits_per_player", BF_CREDITS_PER_PLAYER))
     amount = cpp * max(0, int(players_count))
     return f"🏆 {winner_name} wins {amount} credits."
-
 
 async def build_versus_card(
     attacker: discord.Member,
