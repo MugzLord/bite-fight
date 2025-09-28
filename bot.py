@@ -638,8 +638,9 @@ async def bf_start(ctx):
 
     game.task = bot.loop.create_task(lobby_timer())
 @bot.command(name="bf_prize")
-@commands.has_permissions(manage_guild=True)
+@commands.is_owner()
 async def bf_prize_cmd(ctx, sub: str = None, *args):
+
     """
     !bf_prize                -> show
     !bf_prize creds [100]    -> set mode creds (optional credits per player)
@@ -678,6 +679,13 @@ async def bf_prize_cmd(ctx, sub: str = None, *args):
         await ctx.send("Saved prize settings.")
     else:
         await ctx.send("Unknown subcommand.")
+@bf_prize_cmd.error
+async def bf_prize_cmd_error(ctx, error):
+    from discord.ext import commands
+    if isinstance(error, commands.NotOwner):
+        await ctx.send("Only the bot owner can use `!bf_prize`.", delete_after=10)
+    else:
+        await ctx.send(f"`!bf_prize` error: {error}")
     
 #=======
 # NOTE: no !bf_join – buttons handle join; bf_begin is internal
