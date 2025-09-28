@@ -935,7 +935,7 @@ async def bf_help(ctx):
 
 # ---- Core game loop ----
 async def run_game(ctx, game: BiteFightGame):
-    await asyncio.sleep(2)
+    await asyncio.sleep(4)
 
     while game.running:
         game.round_num += 1
