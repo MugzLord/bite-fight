@@ -27,6 +27,8 @@ BF_CREDITS_PER_PLAYER = int(os.getenv("BF_CREDITS_PER_PLAYER", "100"))  # keep y
 BF_WISHLIST_ITEMS = int(os.getenv("BF_WISHLIST_ITEMS", "1"))
 BF_PRIZE_CONTACT_TEXT = os.getenv("BF_PRIZE_CONTACT_TEXT", "Claim from @YaEli on VU.").strip()
 BF_PRIZE_FILE = os.getenv("BF_PRIZE_FILE", "bf_prize.json")
+# Prize snapshot per channel (locked at tourney start)
+BF_SESSION_PRIZE: dict[int, dict] = {}
 
 
 # Files
@@ -348,6 +350,18 @@ def grey_out(im: Image.Image, dim: float = 0.55) -> Image.Image:
     g = ImageOps.grayscale(im).convert("RGBA")
     g = ImageEnhance.Brightness(g).enhance(dim)
     return g
+
+
+def bf_prize_line_from_state(state: dict, winner_name: str, players_count: int) -> str:
+    mode = state.get("mode", "creds")
+    if mode == "wishlist":
+        items = int(state.get("wishlist_items", 1))
+        contact = state.get("contact_text", BF_PRIZE_CONTACT_TEXT)
+        suffix = "item" if items == 1 else "items"
+        return f"🏆 {winner_name} wins {items} wishlist {suffix}. {contact}"
+    cpp = int(state.get("credits_per_player", BF_CREDITS_PER_PLAYER))
+    amount = cpp * max(0, int(players_count))
+    return f"🏆 {winner_name} wins {amount} credits."
 
 
 async def build_versus_card(
@@ -1122,7 +1136,41 @@ async def run_game(ctx, game: BiteFightGame):
             if getattr(game, "is_tournament", False):
                 lines.append(f"💰 **Pot:** {game.pot}")
             lines.append("🔎 Check your stats with `!bf_profile`")
+
+            # 🔽🔽🔽 ADD THIS BLOCK (prize line + optional ledger) 🔽🔽🔽
+            players_count = len(game.players)
+            state_locked = BF_SESSION_PRIZE.get(ctx.channel.id, BF_PRIZE_STATE)
+            prize_line = bf_prize_line_from_state(state_locked, winner.display_name if winner else "Winner", players_count)
+            lines.append(prize_line)
             
+            # Optional: log prize to your existing ledger so !bf_prizes / !bf_prize_done work
+            try:
+                if winner:
+                    L = _prizes_load()
+                    L["seq"] = int(L.get("seq", 0)) + 1
+                    pid = L["seq"]
+                    if state_locked.get("mode", "creds") == "wishlist":
+                        L["open"].append({
+                            "id": pid,
+                            "type": "wishlist",
+                            "winner_id": winner.id,
+                            "winner_name": winner.display_name,
+                            "count": int(state_locked.get("wishlist_items", 1)),
+                            "contact": state_locked.get("contact_text", BF_PRIZE_CONTACT_TEXT),
+                        })
+                    else:  # creds (100 per player by default)
+                        amount = int(state_locked.get("credits_per_player", BF_CREDITS_PER_PLAYER)) * players_count
+                        L["open"].append({
+                            "id": pid,
+                            "type": "credits",
+                            "winner_id": winner.id,
+                            "winner_name": winner.display_name,
+                            "amount": amount,
+                        })
+                    _prizes_save(L)
+            except Exception:
+                pass
+            # 🔼🔼🔼 END ADDED BLOCK 🔼🔼🔼
             w_embed = discord.Embed(
                 title="🏆 Winner!",
                 description="\n".join(lines),
