@@ -236,7 +236,7 @@ class LobbyView(discord.ui.View):
             return
         embed = self.message.embeds[0]
         joined = len(self.game.players)
-        embed.set_footer(text=f"Host: {self.game._ctx.author.display_name} • Lobby closes in 30s • {joined} joined")
+        embed.set_footer(text=f"Host: {self.game._ctx.author.display_name} • Lobby closes in 60s • {joined} joined")
         try:
             await self.message.edit(embed=embed, view=self)
         except Exception:
@@ -618,7 +618,7 @@ async def bf_start(ctx):
     if game.is_tournament:
         embed.add_field(name="Pot", value=f"💰 {game.pot} • Entry {game.entry_fee}", inline=False)
         # Footer shows host + timer (player count will be appended by the view)
-    embed.set_footer(text=f"Host: {ctx.author.display_name} • Lobby closes in 30s")
+    embed.set_footer(text=f"Host: {ctx.author.display_name} • Lobby closes in 60s")
     
     view = LobbyView(game, host=ctx.author, timeout=30.0)
     game.lobby_view = view
