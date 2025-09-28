@@ -7,14 +7,17 @@ import datetime
 from collections import defaultdict
 from io import BytesIO
 from discord import File
+from typing import Dict, Tuple, Any
+
 
 import discord
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance
 
 # One game per (guild_id, channel_id)
-GAMES: dict[tuple[int, int], BiteFightGame] = {}
-LOBBY_FLAGS: dict[tuple[int, int], bool] = {}  # True while lobby is open
+GAMES: Dict[Tuple[int, int], Any] = {}
+LOBBY_FLAGS: Dict[Tuple[int, int], bool] = {}
+
 
 
 # =========================
