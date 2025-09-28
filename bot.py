@@ -628,12 +628,19 @@ async def bf_start(ctx):
     view.message = msg
 
     async def lobby_timer():
+        # 60s lobby: warn at 30s and 15s, then start
+        await asyncio.sleep(30)
+        if game_in_lobby:
+            names = ", ".join(p.display_name for p in game.players) or "None yet"
+            await ctx.send(f"30s left. Joined: {names}")
+    
         await asyncio.sleep(15)
-        if game.in_lobby:
+        if game_in_lobby:
             names = ", ".join(p.display_name for p in game.players) or "None yet"
             await ctx.send(f"15s left. Joined: {names}")
+    
         await asyncio.sleep(15)
-        if game.in_lobby:
+        if game_in_lobby:
             await bf_begin(ctx)
 
     game.task = bot.loop.create_task(lobby_timer())
