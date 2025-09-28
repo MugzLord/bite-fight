@@ -211,7 +211,7 @@ class BiteFightGame:
         self.buyins.clear()
 
 # Channel ID -> Game
-GAMES: dict[int, BiteFightGame] = {}
+#GAMES: dict[int, BiteFightGame] = {}
 
 # ---- Lobby UI ----
 class LobbyView(discord.ui.View):
