@@ -12,6 +12,11 @@ import discord
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance
 
+# One game per (guild_id, channel_id)
+GAMES: dict[tuple[int, int], BiteFightGame] = {}
+LOBBY_FLAGS: dict[tuple[int, int], bool] = {}  # True while lobby is open
+
+
 # =========================
 # Config / Env
 # =========================
@@ -627,21 +632,27 @@ async def bf_start(ctx):
     msg = await ctx.send(embed=embed, view=view, files=brand_files)
     view.message = msg
 
-    async def lobby_timer():
-        # 60s lobby: warn at 30s and 15s, then start
-        await asyncio.sleep(30)
-        if game_in_lobby:
+    # 60s lobby: warn at 30s and 15s, then start
+    async def lobby_timer(ctx, game, join_seconds: int = 60, warn1: int = 30, warn2: int = 15):
+        # first warning (e.g., after 30s if join_seconds=60)
+        await asyncio.sleep(max(0, join_seconds - warn1))
+        if getattr(game, "in_lobby", False):
             names = ", ".join(p.display_name for p in game.players) or "None yet"
-            await ctx.send(f"30s left. Joined: {names}")
+            await ctx.send(f"{warn1}s left. Joined: {names}")
     
-        await asyncio.sleep(15)
-        if game_in_lobby:
+        # second warning (e.g., 15s left)
+        await asyncio.sleep(max(0, warn1 - warn2))
+        if getattr(game, "in_lobby", False):
             names = ", ".join(p.display_name for p in game.players) or "None yet"
-            await ctx.send(f"15s left. Joined: {names}")
+            await ctx.send(f"{warn2}s left. Joined: {names}")
     
-        await asyncio.sleep(15)
-        if game_in_lobby:
-            await bf_begin(ctx)
+        # lobby end -> begin
+        await asyncio.sleep(max(0, warn2))
+        if getattr(game, "in_lobby", False):
+            # before starting the timer, mark lobby open
+            game.in_lobby = True
+            game.task = asyncio.create_task(lobby_timer(ctx, game))
+
 
     game.task = bot.loop.create_task(lobby_timer())
 @bot.command(name="bf_prize")
