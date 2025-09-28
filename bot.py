@@ -29,7 +29,7 @@ INTENTS.members = True
 BF_PRIZE_MODE = os.getenv("BF_PRIZE_MODE", "creds").lower()  # 'creds' or 'wishlist'
 BF_CREDITS_PER_PLAYER = int(os.getenv("BF_CREDITS_PER_PLAYER", "100"))  # keep your 100 per entry
 BF_WISHLIST_ITEMS = int(os.getenv("BF_WISHLIST_ITEMS", "1"))
-BF_PRIZE_CONTACT_TEXT = os.getenv("BF_PRIZE_CONTACT_TEXT", "Claim from @YaEli on VU.").strip()
+BF_PRIZE_CONTACT_TEXT = os.getenv("BF_PRIZE_CONTACT_TEXT", "Claim from @MikeyMoon on VU.").strip()
 BF_PRIZE_FILE = os.getenv("BF_PRIZE_FILE", "bf_prize.json")
 # Prize snapshot per channel (locked at tourney start)
 BF_SESSION_PRIZE: dict[int, dict] = {}
