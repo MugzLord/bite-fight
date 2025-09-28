@@ -21,6 +21,13 @@ INTENTS = discord.Intents.default()
 INTENTS.message_content = True
 INTENTS.guilds = True
 INTENTS.members = True
+# ---- Bite & Fight prize toggle (minimal) ----
+BF_PRIZE_MODE = os.getenv("BF_PRIZE_MODE", "creds").lower()  # 'creds' or 'wishlist'
+BF_CREDITS_PER_PLAYER = int(os.getenv("BF_CREDITS_PER_PLAYER", "100"))  # keep your 100 per entry
+BF_WISHLIST_ITEMS = int(os.getenv("BF_WISHLIST_ITEMS", "1"))
+BF_PRIZE_CONTACT_TEXT = os.getenv("BF_PRIZE_CONTACT_TEXT", "Claim from @YaEli on VU.").strip()
+BF_PRIZE_FILE = os.getenv("BF_PRIZE_FILE", "bf_prize.json")
+
 
 # Files
 STATS_FILE = os.getenv("BF_STATS_FILE", "bf_stats.json")                 # global/server wins/kills
@@ -120,6 +127,28 @@ def _pick_key_play(events, game):
                 if a.display_name in e and t.display_name in e:
                     return e, a, t
     return None, None, None
+def _bf_prize_load():
+    try:
+        if os.path.exists(BF_PRIZE_FILE):
+            with open(BF_PRIZE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {
+        "mode": BF_PRIZE_MODE,
+        "credits_per_player": BF_CREDITS_PER_PLAYER,
+        "wishlist_items": BF_WISHLIST_ITEMS,
+        "contact_text": BF_PRIZE_CONTACT_TEXT,
+    }
+
+def _bf_prize_save(state: dict):
+    try:
+        with open(BF_PRIZE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+    except Exception:
+        pass
+
+BF_PRIZE_STATE = _bf_prize_load()
 
 # =========================
 # Bot
@@ -274,6 +303,18 @@ def format_line(t, **kw):
     return s
 
 # ---- Utils ----
+def bf_prize_line(winner_name: str, players_count: int) -> str:
+    mode = BF_PRIZE_STATE.get("mode", "creds")
+    if mode == "wishlist":
+        items = int(BF_PRIZE_STATE.get("wishlist_items", 1))
+        contact = BF_PRIZE_STATE.get("contact_text", BF_PRIZE_CONTACT_TEXT)
+        suffix = "item" if items == 1 else "items"
+        return f"🏆 {winner_name} wins {items} wishlist {suffix}. {contact}"
+    # creds (default): 100 per player
+    cpp = int(BF_PRIZE_STATE.get("credits_per_player", BF_CREDITS_PER_PLAYER))
+    amount = cpp * max(0, int(players_count))
+    return f"🏆 {winner_name} wins {amount} credits."
+
 def alive_players(game: BiteFightGame):
     return [p for p in game.players if game.hp.get(p.id, 0) > 0]
 
@@ -582,7 +623,49 @@ async def bf_start(ctx):
             await bf_begin(ctx)
 
     game.task = bot.loop.create_task(lobby_timer())
+@bot.command(name="bf_prize")
+@commands.has_permissions(manage_guild=True)
+async def bf_prize_cmd(ctx, sub: str = None, *args):
+    """
+    !bf_prize                -> show
+    !bf_prize creds [100]    -> set mode creds (optional credits per player)
+    !bf_prize wishlist [n]   -> set mode wishlist (optional items count)
+    !bf_prize contact <text> -> set claim text for wishlist
+    !bf_prize save           -> persist to file
+    """
+    if not sub:
+        mode = BF_PRIZE_STATE.get("mode")
+        cpp = BF_PRIZE_STATE.get("credits_per_player")
+        items = BF_PRIZE_STATE.get("wishlist_items")
+        contact = BF_PRIZE_STATE.get("contact_text")
+        await ctx.send(f"Prize mode: {mode} | credits_per_player: {cpp} | wishlist_items: {items} | contact: {contact}")
+        return
 
+    s = sub.lower()
+    if s == "creds":
+        BF_PRIZE_STATE["mode"] = "creds"
+        if args and args[0].isdigit():
+            BF_PRIZE_STATE["credits_per_player"] = int(args[0])
+        await ctx.send(f"OK. Mode=creds | credits_per_player={BF_PRIZE_STATE['credits_per_player']}")
+    elif s == "wishlist":
+        BF_PRIZE_STATE["mode"] = "wishlist"
+        if args and args[0].isdigit():
+            BF_PRIZE_STATE["wishlist_items"] = int(args[0])
+        await ctx.send(f"OK. Mode=wishlist | items={BF_PRIZE_STATE['wishlist_items']}")
+    elif s == "contact":
+        txt = " ".join(args).strip()
+        if not txt:
+            await ctx.send("Provide contact text, e.g. `!bf_prize contact Claim from @YaEli on VU.`")
+            return
+        BF_PRIZE_STATE["contact_text"] = txt
+        await ctx.send("OK. Updated contact text.")
+    elif s == "save":
+        _bf_prize_save(BF_PRIZE_STATE)
+        await ctx.send("Saved prize settings.")
+    else:
+        await ctx.send("Unknown subcommand.")
+    
+#=======
 # NOTE: no !bf_join – buttons handle join; bf_begin is internal
 async def bf_begin(ctx):
     """Begin the match (called by the button/timeout)."""
