@@ -16,7 +16,6 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance
 # One game per (guild_id, channel_id)
 GAMES: Dict[Tuple[int, int], Any] = {}
 LOBBY_FLAGS: Dict[Tuple[int, int], bool] = {}
-
 # =========================
 # Config / Env
 # =========================
